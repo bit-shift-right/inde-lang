@@ -1,0 +1,80 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "inde-lang"
+version = "0.1.0"
+description = "A modern, stack-oriented, concatenative programming language."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [ { name = "Dillon Shephard" }, ]
+keywords = [ "inde", "inde-lang", "cli", "lexer", "parser", "interpreter", "compiler", ]
+
+[project.scripts]
+inde = "inde.inde:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/inde"]
+
+[tool.hatch.envs.default]
+python = "3.11"
+dependencies = [ "ruff", "mypy", ]
+
+[tool.hatch.envs.default.scripts]
+main = "inde"
+help = "inde --help"
+lint = "ruff check ."
+format = "ruff format ."
+format-check = "ruff format --check ."
+typecheck = "mypy src/"
+
+cleanup = [
+    "ruff check --fix .",
+    "ruff format .",
+    "mypy",
+]
+
+[tool.hatch.envs.test]
+extra-dependencies = [ "pytest", ]
+
+[tool.hatch.envs.test.scripts]
+run = "pytest tests"
+
+check = [
+    "ruff check .",
+    "ruff format --check .",
+    "mypy",
+    "pytest tests",
+]
+
+[tool.hatch.build.targets.sdist]
+only-include = [
+    "src",
+    "tests",
+    "README.md",
+    "LICENSE",
+    "pyproject.toml",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = [ "E", "F", "I", "B", "UP", ]
+
+[tool.ruff.format]
+quote-style = "preserve"
+indent-style = "space"
+
+[tool.mypy]
+python_version = "3.11"
+files = ["src/inde"]
+strict = true
+pretty = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

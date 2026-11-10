@@ -1,0 +1,28 @@
+# Python caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Package caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Environments
+env/
+ENV/
+venv/
+.venv/
+
+# Environment Variables
+.env
+.env.*
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Misc
+tmp/
+temp/
