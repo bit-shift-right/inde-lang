@@ -16,8 +16,6 @@ designed with stronger static typing, better error handling and more convenient 
 
 ## Introduction
 
-> _“inde [ˈɪn.dɛ] (thence, from there), represents the core philosophy of a concatenative language”_
-
 The intention of inde is to serve as something of a spiritual successor to some of the most well known 
 [stack-oriented](https://en.wikipedia.org/wiki/Stack-oriented_programming) languages such as 
 [Forth](https://www.forth.com/forth/). Rather than being an outright replacement, it is designed to offer 
