@@ -1,4 +1,4 @@
-# inde [![License](https://img.shields.io/github/license/bit-shift-right/inde-lang)](https://github.com/bit-shift-right/inde-lang/blob/main/LICENSE)
+# inde [![License](https://img.shields.io/github/license/bit-shift-right/inde-lang)](https://github.com/bit-shift-right/inde-lang/blob/main/LICENSE) [![CI](https://github.com/bit-shift-right/inde-lang/actions/workflows/ci.yml/badge.svg)](https://github.com/bit-shift-right/inde-lang/actions/workflows/ci.yml)
 
 <a id="banner-logo" href="https://github.com/bit-shift-right/inde-lang">
     <picture>
