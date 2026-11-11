@@ -1,6 +1,8 @@
 import argparse
 from importlib.metadata import version
 
+from inde import lexer
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(
@@ -16,6 +18,8 @@ def main() -> None:
     )
 
     parser.parse_args()
+
+    lexer.tokenize("    abc", "inde")
 
 
 if __name__ == "__main__":
