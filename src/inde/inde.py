@@ -19,7 +19,7 @@ def main() -> None:
 
     parser.parse_args()
 
-    lexer.tokenize("    abc", "inde")
+    lexer.tokenize("      ;(\n\n\n abc ;)\n;abc \r", "inde")
 
 
 if __name__ == "__main__":

@@ -61,7 +61,30 @@ class Lexer:
     def get_location(self) -> Location:
         return Location(self.line, self.column, self.cursor)
 
-    def skip_whitespace(self) -> None:
+    def find_comment_end(self) -> None:
+        comment_start = self.get_location()
+
+        self.advance()
+        current_character = self.peek()
+
+        if current_character == "(":
+            while True:
+                if self.at_end():
+                    self.fail("unterminated block comment", comment_start)
+
+                if current_character == ";" and self.peek(1) == ")":
+                    self.advance()
+                    self.advance()
+                    return
+
+                self.advance()
+                current_character = self.peek()
+        else:
+            while not self.at_end() and self.peek() != "\n":
+                self.advance()
+            return
+
+    def skip_whitespace_and_comments(self) -> None:
         while not self.at_end():
             current_character = self.peek()
 
@@ -71,11 +94,14 @@ class Lexer:
                 self.fail(
                     "a lone carriage return is not a line break", self.get_location()
                 )
+            elif current_character == ';':
+                self.find_comment_end()
             else:
                 return
 
     def next_token(self) -> Token:
-        self.skip_whitespace()
+        self.skip_whitespace_and_comments()
+
         token_start = self.get_location()
         if self.at_end():
             return Token(TokenType.EOF, "", token_start)
