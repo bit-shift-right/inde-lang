@@ -9,7 +9,28 @@ VALID_WHITESPACE = [" ", "\t", "\n", "\r\n"]
 
 
 class TokenType(Enum):
+    LPAREN = auto()
+    RPAREN = auto()
+    LBRACKET = auto()
+    RBRACKET = auto()
+    LBRACE = auto()
+    RBRACE = auto()
+    COMMA = auto()
+    COLON = auto()
+
     EOF = auto()
+
+
+VALID_DELIMITERS: dict[str, TokenType] = {
+    "(": TokenType.LPAREN,
+    ")": TokenType.RPAREN,
+    "[": TokenType.LBRACKET,
+    "]": TokenType.RBRACKET,
+    "{": TokenType.LBRACE,
+    "}": TokenType.RBRACE,
+    ",": TokenType.COMMA,
+    ":": TokenType.COLON,
+}
 
 
 @dataclass
@@ -24,6 +45,7 @@ class Token:
     type: TokenType
     text: str
     location: Location
+    value: object = None
 
 
 class Lexer:
@@ -35,7 +57,7 @@ class Lexer:
         self.log = logger.Logger(program_name)
 
     def fail(self, message: str, location: Location) -> NoReturn:
-        self.log.print_error(message, f'{location.line}:{location.column}:')
+        self.log.print_error(message, f"{location.line}:{location.column}:")
         sys.exit(1)
 
     def at_end(self) -> bool:
@@ -44,7 +66,7 @@ class Lexer:
     def advance(self) -> str:
         consumed = self.source[self.cursor]
         self.cursor += 1
-        if consumed == '\n':
+        if consumed == "\n":
             self.column = 1
             self.line += 1
         else:
@@ -60,6 +82,11 @@ class Lexer:
 
     def get_location(self) -> Location:
         return Location(self.line, self.column, self.cursor)
+
+    def emit_token(
+        self, type: TokenType, start: Location, value: object = None
+    ) -> Token:
+        return Token(type, self.source[start.cursor : self.cursor], start, value)
 
     def find_comment_end(self) -> None:
         comment_start = self.get_location()
@@ -90,11 +117,12 @@ class Lexer:
 
             if current_character in VALID_WHITESPACE:
                 self.advance()
-            elif current_character == '\r':
+            elif current_character == "\r":
                 self.fail(
-                    "a lone carriage return is not a line break", self.get_location()
+                    "a lone carriage return is not a valid line break",
+                    self.get_location(),
                 )
-            elif current_character == ';':
+            elif current_character == ";":
                 self.find_comment_end()
             else:
                 return
@@ -107,8 +135,11 @@ class Lexer:
             return Token(TokenType.EOF, "", token_start)
 
         current_character = self.peek()
+        if current_character in VALID_DELIMITERS:
+            self.advance()
+            return self.emit_token(VALID_DELIMITERS[current_character], token_start)
 
-        self.fail(f"unexpected character {current_character}", token_start)
+        self.fail(f"unexpected character `{current_character}`", token_start)
 
     def get_tokens(self) -> list[Token]:
         tokens: list[Token] = []
@@ -121,3 +152,13 @@ class Lexer:
 
 def tokenize(source: str, program_name: str) -> list[Token]:
     return Lexer(source, program_name).get_tokens()
+
+
+def dump_tokens(tokens: list[Token]) -> None:
+    for token in tokens:
+        print(
+            f"{token.location.line}:{token.location.column:<6}"
+            f" | {token.type.name:10} "
+            f"text={token.text!r}   "
+            f"value={token.value!r}"
+        )

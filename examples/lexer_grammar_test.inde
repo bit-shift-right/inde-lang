@@ -1,0 +1,13 @@
+;(
+Test
+block
+comment
+
+    ;(
+        Nesting works too
+    ;)
+
+;)
+      ; Test line comment
+
+[]{}(),:

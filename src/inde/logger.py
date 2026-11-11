@@ -35,24 +35,24 @@ class Logger:
         start_code = "\x1b["
         reset_code = "\x1b[0m"
 
-        start_code += f'{foreground_color.value}'
-        start_code += f';{background_color.value + 10}'
+        start_code += f"{foreground_color.value}"
+        start_code += f";{background_color.value + 10}"
         if bold:
-            start_code += ';1'
+            start_code += ";1"
         if italic:
-            start_code += ';3'
+            start_code += ";3"
         if underline:
-            start_code += ';4'
+            start_code += ";4"
         if strikethrough:
-            start_code += ';9'
+            start_code += ";9"
         start_code += "m"
 
         return start_code + text + reset_code
 
     def print_error(self, message: str, location_string: str = "") -> None:
         print(
-            f'{location_string}{self.program_name}: '
-            f'{self.decorate_text("error:", Color.RED)} '
-            f'{message}',
+            f"{location_string}{self.program_name}: "
+            f"{self.decorate_text('error:', Color.RED)} "
+            f"{message}",
             file=sys.stderr,
         )
