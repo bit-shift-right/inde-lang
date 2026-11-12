@@ -1,6 +1,8 @@
+from typing import Any
+
 import pytest
 
-from inde.lexer import TokenType, tokenize
+from inde.lexer import Token, TokenType, tokenize
 
 PROGRAM_NAME: str = "inde_test"
 
@@ -9,17 +11,17 @@ def list_all_token_types(source: str) -> list[TokenType]:
     return [token.type for token in tokenize(source, PROGRAM_NAME)[:-1]]  # Exclude EOF
 
 
-def list_all_token_texts(source: str) -> list[TokenType]:
+def list_all_token_texts(source: str) -> list[str]:
     return [token.text for token in tokenize(source, PROGRAM_NAME)[:-1]]  # Exclude EOF
 
 
-def expect_single_token(source: str):
+def expect_single_token(source: str) -> Token:
     tokens = tokenize(source, PROGRAM_NAME)
     assert len(tokens) == 2, f"expected one token, got {tokens[:-1]}"
     return tokens[0]
 
 
-def get_failure_message(source: str) -> str:
+def get_failure_message(source: str) -> Any:
     with pytest.raises(SystemExit) as err:
         tokenize(source, PROGRAM_NAME)
 
@@ -29,7 +31,7 @@ def get_failure_message(source: str) -> str:
 ### Test general lexer functionality
 
 
-def test_location_counts_lines_and_columns_from_one():
+def test_location_counts_lines_and_columns_from_one() -> None:
     tokens = tokenize("[\n  ]", PROGRAM_NAME)
     assert (tokens[0].location.line, tokens[0].location.column) == (1, 1)
     assert (tokens[1].location.line, tokens[1].location.column) == (2, 3)
@@ -38,14 +40,14 @@ def test_location_counts_lines_and_columns_from_one():
 ### Test whitespace and comments
 
 
-def test_empty_source_only_contains_eof():
+def test_empty_source_only_contains_eof() -> None:
     assert [token.type for token in tokenize("", PROGRAM_NAME)] == [TokenType.EOF]
     assert [token.type for token in tokenize("  \t\n ; comment", PROGRAM_NAME)] == [
         TokenType.EOF
     ]
 
 
-def test_crlf_is_valid_line_break():
+def test_crlf_is_valid_line_break() -> None:
     assert list_all_token_types("(\r\n)") == [TokenType.LPAREN, TokenType.RPAREN]
 
 
@@ -56,15 +58,15 @@ def test_crlf_is_valid_line_break():
         # TODO: Test for other invalid whitespace
     ],
 )
-def test_invalid_whitespace(source, fragment):
+def test_invalid_whitespace(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
-def test_unterminated_block_comment():
+def test_unterminated_block_comment() -> None:
     assert "unterminated block comment" in get_failure_message(";( a b c")
 
 
-def test_line_numbers_after_block_comment():
+def test_line_numbers_after_block_comment() -> None:
     token = tokenize(";( one\ntwo\n;) [", PROGRAM_NAME)[0]
     assert (token.location.line, token.location.column) == (3, 4)
 
@@ -81,5 +83,5 @@ def test_line_numbers_after_block_comment():
         (";) stray\n)", [")"]),
     ],
 )
-def test_block_comments(source, expected):
+def test_block_comments(source: str, expected: list[str]) -> None:
     assert list_all_token_texts(source) == expected
