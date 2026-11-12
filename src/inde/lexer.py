@@ -1,11 +1,10 @@
-import sys
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import NoReturn
 
 from inde import logger
 
-VALID_WHITESPACE = [" ", "\t", "\n", "\r\n"]
+VALID_WHITESPACE: list[str] = [" ", "\t", "\n", "\r\n"]
 
 
 class TokenType(Enum):
@@ -51,17 +50,20 @@ class Token:
 class Lexer:
     def __init__(self, source: str, program_name: str) -> None:
         self.source = source
+        self.program_name = program_name
         self.cursor = 0
         self.line = 1
         self.column = 1
-        self.log = logger.Logger(program_name)
 
     def fail(self, message: str, location: Location) -> NoReturn:
-        self.log.print_error(message, f"{location.line}:{location.column}:")
-        sys.exit(1)
+        raise SystemExit(
+            logger.format_error(
+                f'{self.program_name}:{location.line}:{location.column}: ', message
+            )
+        )
 
-    def at_end(self) -> bool:
-        return self.cursor >= len(self.source)
+    def at_end(self, ahead: int = 0) -> bool:
+        return (self.cursor + ahead) >= len(self.source)
 
     def advance(self) -> str:
         consumed = self.source[self.cursor]
@@ -75,7 +77,7 @@ class Lexer:
 
     def peek(self, ahead: int = 0) -> str:
         peek_cursor = self.cursor + ahead
-        if not self.at_end():
+        if not self.at_end(ahead):
             return self.source[peek_cursor]
         else:
             return ""
@@ -118,10 +120,12 @@ class Lexer:
             if current_character in VALID_WHITESPACE:
                 self.advance()
             elif current_character == "\r":
-                self.fail(
-                    "a lone carriage return is not a valid line break",
-                    self.get_location(),
-                )
+                if self.peek(1) != "\n":
+                    self.fail(
+                        "a lone carriage return is not a valid line break",
+                        self.get_location(),
+                    )
+                self.advance()
             elif current_character == ";":
                 self.find_comment_end()
             else:

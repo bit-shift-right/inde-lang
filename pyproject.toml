@@ -29,12 +29,12 @@ help = "inde --help"
 lint = "ruff check ."
 format = "ruff format ."
 format-check = "ruff format --check ."
-typecheck = "mypy src/"
+typecheck = "mypy --strict"
 
 cleanup = [
     "ruff check --fix .",
     "ruff format .",
-    "mypy",
+    "mypy --strict",
 ]
 
 [tool.hatch.envs.test]
@@ -46,7 +46,7 @@ run = "pytest tests"
 check = [
     "ruff check .",
     "ruff format --check .",
-    "mypy",
+    "mypy --strict",
     "pytest tests",
 ]
 

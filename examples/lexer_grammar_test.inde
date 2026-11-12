@@ -5,9 +5,9 @@ comment
 
     ;(
         Nesting works too
-    ;)
+    ;;)
 
-;)
+;;)
       ; Test line comment
 
 []{}(),:
