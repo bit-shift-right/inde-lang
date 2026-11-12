@@ -164,3 +164,70 @@ def test_name_errors(source: str, fragment: str) -> None:
 )
 def test_keywords(source: str) -> None:
     assert expect_single_token(source).type is TokenType.KEYWORD
+
+
+### Test symbols
+
+
+@pytest.mark.parametrize("source", ["->", "?", "&", "|", "="])
+def test_symbols(source: str) -> None:
+    assert expect_single_token(source).type is TokenType.SYMBOL
+
+
+### Test type variables and type names
+
+
+@pytest.mark.parametrize(
+    ("source", "type"),
+    [
+        ("T", TokenType.TYPE_VAR),
+        ("Q1", TokenType.TYPE_VAR),
+        ("Q10", TokenType.TYPE_VAR),
+        ("Shape", TokenType.TYPE_NAME),
+        ("Rect3D", TokenType.TYPE_NAME),
+    ],
+)
+def test_type_variables_and_type_names(source: str, type: TokenType) -> None:
+    assert expect_single_token(source).type is type
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("Shape_x", "letters and digits"),
+        ("Foo-bar", "letters and digits"),
+        ("Foo?", "letters and digits"),
+    ],
+)
+def test_type_name_errors(source: str, fragment: TokenType) -> None:
+    assert fragment in get_failure_message(source)
+
+
+### Test row variables
+
+
+@pytest.mark.parametrize(
+    ("source", "type"),
+    [
+        ("..a", TokenType.ROW_VAR),
+        ("..rest", TokenType.ROW_VAR),
+        ("..a2", TokenType.ROW_VAR),
+        ("..aB", TokenType.ROW_VAR),
+    ],
+)
+def test_row_variable_names(source: str, type: TokenType) -> None:
+    assert expect_single_token(source).type is type
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("..", "must have a name"),
+        ("..A", "lowercase"),
+        ("..1", "must start with a letter"),
+        ("..a-b", "letters and digits"),
+        ("...", "letters and digits"),
+    ],
+)
+def test_row_variable_errors(source: str, fragment: TokenType) -> None:
+    assert fragment in get_failure_message(source)

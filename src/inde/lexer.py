@@ -5,8 +5,6 @@ from typing import NoReturn
 
 from inde import logger
 
-VALID_WHITESPACE: tuple[str, ...] = (" ", "\t", "\n", "\r\n")
-
 
 class TokenType(Enum):
     # Delimiters
@@ -22,9 +20,16 @@ class TokenType(Enum):
     # Words
     NAME = auto()
     KEYWORD = auto()
+    SYMBOL = auto()
+    TYPE_VAR = auto()
+    TYPE_NAME = auto()
+    ROW_VAR = auto()
 
     # End of file marker
     EOF = auto()
+
+
+VALID_WHITESPACE: tuple[str, ...] = (" ", "\t", "\n", "\r\n")
 
 
 VALID_DELIMITERS: dict[str, TokenType] = {
@@ -54,6 +59,9 @@ VALID_KEYWORDS: tuple[str, ...] = (
     "let",
     "in",
 )
+
+
+VALID_SYMBOLS = ("?", "&", "|", "=", "->")
 
 
 @dataclass
@@ -176,8 +184,47 @@ class Lexer:
         if not token_text.isascii() or not token_text.isprintable():
             self.fail("names may contain only printable ASCII characters", token_start)
 
+        if token_text in VALID_SYMBOLS:
+            return self.emit_token(TokenType.SYMBOL, token_start)
+
         if token_text in VALID_KEYWORDS:
             return self.emit_token(TokenType.KEYWORD, token_start)
+
+        if token_text.startswith(".."):
+            row_var_name = token_text[2:]
+
+            if len(row_var_name) < 1:
+                self.fail("a row variable must have a name", token_start)
+
+            if row_var_name[0].isupper():
+                self.fail(
+                    "a row variable name must start with a lowercase letter",
+                    token_start,
+                )
+
+            if row_var_name[0].isdigit():
+                self.fail("a row variable name must start with a letter", token_start)
+
+            if not row_var_name.isalnum():
+                self.fail(
+                    "a row variable name may only contain letters and digits",
+                    token_start,
+                )
+
+            return self.emit_token(TokenType.ROW_VAR, token_start)
+
+        if token_text[0].isupper():
+            if not token_text.isalnum():
+                self.fail(
+                    "a type name may only contain letters and digits", token_start
+                )
+
+            if len(token_text) == 1:
+                return self.emit_token(TokenType.TYPE_VAR, token_start)
+            elif token_text[1:].isdigit():
+                return self.emit_token(TokenType.TYPE_VAR, token_start)
+
+            return self.emit_token(TokenType.TYPE_NAME, token_start)
 
         return self.emit_token(TokenType.NAME, token_start)
 
