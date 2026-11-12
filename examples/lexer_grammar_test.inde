@@ -11,3 +11,5 @@ comment
       ; Test line comment
 
 []{}(),:
+
+abc def dup swap drop + -

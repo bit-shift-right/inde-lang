@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum, auto
+from pathlib import Path
 from typing import NoReturn
 
 from inde import logger
@@ -8,6 +9,7 @@ VALID_WHITESPACE: list[str] = [" ", "\t", "\n", "\r\n"]
 
 
 class TokenType(Enum):
+    # Delimiters
     LPAREN = auto()
     RPAREN = auto()
     LBRACKET = auto()
@@ -17,6 +19,10 @@ class TokenType(Enum):
     COMMA = auto()
     COLON = auto()
 
+    # Generics
+    NAME = auto()
+
+    # End of file marker
     EOF = auto()
 
 
@@ -85,12 +91,27 @@ class Lexer:
     def get_location(self) -> Location:
         return Location(self.line, self.column, self.cursor)
 
-    def emit_token(
-        self, type: TokenType, start: Location, value: object = None
-    ) -> Token:
-        return Token(type, self.source[start.cursor : self.cursor], start, value)
+    def is_character_end_of_token(self, character: str) -> bool:
+        return (
+            character == ""
+            or character in VALID_WHITESPACE
+            or character in VALID_DELIMITERS
+            or character in "'\";"
+        )
 
-    def find_comment_end(self) -> None:
+    def find_end_of_token(self, token_start: Location) -> str:
+        while not self.is_character_end_of_token(self.peek()):
+            self.advance()
+        return self.source[token_start.cursor : self.cursor]
+
+    def emit_token(
+        self, type: TokenType, token_start: Location, value: object = None
+    ) -> Token:
+        return Token(
+            type, self.source[token_start.cursor : self.cursor], token_start, value
+        )
+
+    def find_end_of_comment(self) -> None:
         comment_start = self.get_location()
 
         self.advance()
@@ -127,9 +148,14 @@ class Lexer:
                     )
                 self.advance()
             elif current_character == ";":
-                self.find_comment_end()
+                self.find_end_of_comment()
             else:
                 return
+
+    def lex_word(self, token_start: Location) -> Token:
+        self.find_end_of_token(token_start)
+
+        return self.emit_token(TokenType.NAME, token_start)
 
     def next_token(self) -> Token:
         self.skip_whitespace_and_comments()
@@ -143,7 +169,7 @@ class Lexer:
             self.advance()
             return self.emit_token(VALID_DELIMITERS[current_character], token_start)
 
-        self.fail(f"unexpected character `{current_character}`", token_start)
+        return self.lex_word(token_start)
 
     def get_tokens(self) -> list[Token]:
         tokens: list[Token] = []
@@ -154,15 +180,17 @@ class Lexer:
                 return tokens
 
 
-def tokenize(source: str, program_name: str) -> list[Token]:
+def tokenize(source: str, program_name: str = Path(__file__).stem) -> list[Token]:
     return Lexer(source, program_name).get_tokens()
 
 
 def dump_tokens(tokens: list[Token]) -> None:
     for token in tokens:
         print(
-            f"{token.location.line}:{token.location.column:<6}"
-            f" | {token.type.name:10} "
-            f"text={token.text!r}   "
-            f"value={token.value!r}"
+            f"{token.location.line}:{token.location.column}"
+            f" | {token.type.name}: (\n"
+            f"    text={token.text!r}\n"
+            f"    value={token.value!r}\n"
+            f")\n"
         )
+    print("----- token dump")
