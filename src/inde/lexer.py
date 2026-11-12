@@ -5,7 +5,7 @@ from typing import NoReturn
 
 from inde import logger
 
-VALID_WHITESPACE: list[str] = [" ", "\t", "\n", "\r\n"]
+VALID_WHITESPACE: tuple[str, ...] = (" ", "\t", "\n", "\r\n")
 
 
 class TokenType(Enum):
@@ -19,8 +19,9 @@ class TokenType(Enum):
     COMMA = auto()
     COLON = auto()
 
-    # Generics
+    # Words
     NAME = auto()
+    KEYWORD = auto()
 
     # End of file marker
     EOF = auto()
@@ -36,6 +37,23 @@ VALID_DELIMITERS: dict[str, TokenType] = {
     ",": TokenType.COMMA,
     ":": TokenType.COLON,
 }
+
+
+VALID_KEYWORDS: tuple[str, ...] = (
+    "word",
+    "end",
+    "type",
+    "linear",
+    "where",
+    "if",
+    "else",
+    "while",
+    "do",
+    "match",
+    "case",
+    "let",
+    "in",
+)
 
 
 @dataclass
@@ -153,7 +171,13 @@ class Lexer:
                 return
 
     def lex_word(self, token_start: Location) -> Token:
-        self.find_end_of_token(token_start)
+        token_text = self.find_end_of_token(token_start)
+
+        if not token_text.isascii() or not token_text.isprintable():
+            self.fail("names may contain only printable ASCII characters", token_start)
+
+        if token_text in VALID_KEYWORDS:
+            return self.emit_token(TokenType.KEYWORD, token_start)
 
         return self.emit_token(TokenType.NAME, token_start)
 

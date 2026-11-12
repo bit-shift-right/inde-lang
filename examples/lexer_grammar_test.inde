@@ -3,13 +3,10 @@ Test
 block
 comment
 
-    ;(
-        Nesting works too
-    ;;)
-
-;;)
-      ; Test line comment
+;) real-token
+real-token-2     ; Test line comment
 
 []{}(),:
 
 abc def dup swap drop + -
+if end else while do

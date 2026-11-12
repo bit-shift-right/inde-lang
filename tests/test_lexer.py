@@ -51,6 +51,7 @@ def test_crlf_is_valid_line_break() -> None:
     ("source", "fragment"),
     [
         ("\r", "lone carriage return"),
+        ("(   )", "printable ASCII"),  # a non-breaking space is not whitespace
         # TODO: Test for other invalid whitespace
     ],
 )
@@ -83,7 +84,23 @@ def test_block_comments(source: str, expected: list[str]) -> None:
     assert list_all_token_texts(source) == expected
 
 
-### Names
+### Test delimiters
+
+
+def test_delimiters() -> None:
+    assert list_all_token_types("()[]{},:") == [
+        TokenType.LPAREN,
+        TokenType.RPAREN,
+        TokenType.LBRACKET,
+        TokenType.RBRACKET,
+        TokenType.LBRACE,
+        TokenType.RBRACE,
+        TokenType.COMMA,
+        TokenType.COLON,
+    ]
+
+
+### Test names
 
 
 @pytest.mark.parametrize(
@@ -107,3 +124,43 @@ def test_block_comments(source: str, expected: list[str]) -> None:
 )
 def test_names(source: str) -> None:
     assert expect_single_token(source).type is TokenType.NAME
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("café", "printable ASCII"),
+        ("Éclair", "printable ASCII"),
+        ("T١", "printable ASCII"),
+        ("..aé", "printable ASCII"),
+        ("a\x00b", "printable ASCII"),
+        ("x\x7f", "printable ASCII"),
+    ],
+)
+def test_name_errors(source: str, fragment: str) -> None:
+    assert fragment in get_failure_message(source)
+
+
+### Test keywords
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "word",
+        "end",
+        "type",
+        "linear",
+        "where",
+        "if",
+        "else",
+        "while",
+        "do",
+        "match",
+        "case",
+        "let",
+        "in",
+    ],
+)
+def test_keywords(source: str) -> None:
+    assert expect_single_token(source).type is TokenType.KEYWORD
