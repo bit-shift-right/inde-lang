@@ -9,7 +9,9 @@ real-token-2     ; Test line comment
 []{}(),:
 
 abc def dup swap drop + -
-if end else while do
+if end else while do const
 -> ? & | =
 ..abc ..aBc124
 Shape T Q1 Q10 Rect3D
+true false
+CONSTANT_NAME123

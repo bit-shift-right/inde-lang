@@ -8,37 +8,41 @@ from inde import logger
 
 class TokenType(Enum):
     # Delimiters
-    LPAREN = auto()
-    RPAREN = auto()
-    LBRACKET = auto()
-    RBRACKET = auto()
-    LBRACE = auto()
-    RBRACE = auto()
+    LEFT_PARENTHESIS = auto()
+    RIGHT_PARENTHESIS = auto()
+    LEFT_BRACKET = auto()
+    RIGHT_BRACKET = auto()
+    LEFT_BRACE = auto()
+    RIGHT_BRACE = auto()
     COMMA = auto()
     COLON = auto()
+
+    # Literals
+    BOOLEAN = auto()
 
     # Words
     NAME = auto()
     KEYWORD = auto()
     SYMBOL = auto()
-    TYPE_VAR = auto()
+    TYPE_VARIABLE = auto()
     TYPE_NAME = auto()
-    ROW_VAR = auto()
+    ROW_VARIABLE = auto()
+    CONSTANT_NAME = auto()
 
     # End of file marker
-    EOF = auto()
+    END_OF_FILE = auto()
 
 
 VALID_WHITESPACE: tuple[str, ...] = (" ", "\t", "\n", "\r\n")
 
 
 VALID_DELIMITERS: dict[str, TokenType] = {
-    "(": TokenType.LPAREN,
-    ")": TokenType.RPAREN,
-    "[": TokenType.LBRACKET,
-    "]": TokenType.RBRACKET,
-    "{": TokenType.LBRACE,
-    "}": TokenType.RBRACE,
+    "(": TokenType.LEFT_PARENTHESIS,
+    ")": TokenType.RIGHT_PARENTHESIS,
+    "[": TokenType.LEFT_BRACKET,
+    "]": TokenType.RIGHT_BRACKET,
+    "{": TokenType.LEFT_BRACE,
+    "}": TokenType.RIGHT_BRACE,
     ",": TokenType.COMMA,
     ":": TokenType.COLON,
 }
@@ -58,10 +62,16 @@ VALID_KEYWORDS: tuple[str, ...] = (
     "case",
     "let",
     "in",
+    "const",
 )
 
 
-VALID_SYMBOLS = ("?", "&", "|", "=", "->")
+VALID_SYMBOLS: tuple[str, ...] = ("?", "&", "|", "=", "->")
+
+
+VALID_CONSTANT_NAME_CHARACTERS: set[str] = set(
+    '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'
+)
 
 
 @dataclass
@@ -190,6 +200,12 @@ class Lexer:
         if token_text in VALID_KEYWORDS:
             return self.emit_token(TokenType.KEYWORD, token_start)
 
+        if token_text == "true":
+            return self.emit_token(TokenType.BOOLEAN, token_start, True)
+
+        if token_text == "false":
+            return self.emit_token(TokenType.BOOLEAN, token_start, False)
+
         if token_text.startswith(".."):
             row_var_name = token_text[2:]
 
@@ -211,20 +227,27 @@ class Lexer:
                     token_start,
                 )
 
-            return self.emit_token(TokenType.ROW_VAR, token_start)
+            return self.emit_token(TokenType.ROW_VARIABLE, token_start)
 
         if token_text[0].isupper():
-            if not token_text.isalnum():
-                self.fail(
-                    "a type name may only contain letters and digits", token_start
-                )
+            if len(token_text) == 1 or token_text[1:].isdigit():
+                return self.emit_token(TokenType.TYPE_VARIABLE, token_start)
 
-            if len(token_text) == 1:
-                return self.emit_token(TokenType.TYPE_VAR, token_start)
-            elif token_text[1:].isdigit():
-                return self.emit_token(TokenType.TYPE_VAR, token_start)
+            if all(
+                character.isupper() or character.isdigit() or character == "_"
+                for character in token_text
+            ):
+                return self.emit_token(TokenType.CONSTANT_NAME, token_start)
 
-            return self.emit_token(TokenType.TYPE_NAME, token_start)
+            if token_text.isalnum():
+                return self.emit_token(TokenType.TYPE_NAME, token_start)
+
+            self.fail(
+                f"`{token_text}` is not a valid name: "
+                f"a type name may only contain letters and digits and "
+                f"a constant name may only contain letters, digits and underscores",
+                token_start,
+            )
 
         return self.emit_token(TokenType.NAME, token_start)
 
@@ -233,7 +256,7 @@ class Lexer:
 
         token_start = self.get_location()
         if self.at_end():
-            return Token(TokenType.EOF, "", token_start)
+            return Token(TokenType.END_OF_FILE, "", token_start)
 
         current_character = self.peek()
         if current_character in VALID_DELIMITERS:
@@ -247,7 +270,7 @@ class Lexer:
         while True:
             token = self.next_token()
             tokens.append(token)
-            if token.type is TokenType.EOF:
+            if token.type is TokenType.END_OF_FILE:
                 return tokens
 
 

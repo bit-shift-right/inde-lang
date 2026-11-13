@@ -6,11 +6,11 @@ from inde.lexer import Token, TokenType, tokenize
 
 
 def list_all_token_types(source: str) -> list[TokenType]:
-    return [token.type for token in tokenize(source)[:-1]]  # Exclude EOF
+    return [token.type for token in tokenize(source)[:-1]]  # Exclude END_OF_FILE
 
 
 def list_all_token_texts(source: str) -> list[str]:
-    return [token.text for token in tokenize(source)[:-1]]  # Exclude EOF
+    return [token.text for token in tokenize(source)[:-1]]  # Exclude END_OF_FILE
 
 
 def expect_single_token(source: str) -> Token:
@@ -38,13 +38,18 @@ def test_location_counts_lines_and_columns_from_one() -> None:
 ### Test whitespace and comments
 
 
-def test_empty_source_only_contains_eof() -> None:
-    assert [token.type for token in tokenize("")] == [TokenType.EOF]
-    assert [token.type for token in tokenize("  \t\n ; comment")] == [TokenType.EOF]
+def test_empty_source_only_contains_end_of_file() -> None:
+    assert [token.type for token in tokenize("")] == [TokenType.END_OF_FILE]
+    assert [token.type for token in tokenize("  \t\n ; comment")] == [
+        TokenType.END_OF_FILE
+    ]
 
 
 def test_crlf_is_valid_line_break() -> None:
-    assert list_all_token_types("(\r\n)") == [TokenType.LPAREN, TokenType.RPAREN]
+    assert list_all_token_types("(\r\n)") == [
+        TokenType.LEFT_PARENTHESIS,
+        TokenType.RIGHT_PARENTHESIS,
+    ]
 
 
 @pytest.mark.parametrize(
@@ -89,15 +94,27 @@ def test_block_comments(source: str, expected: list[str]) -> None:
 
 def test_delimiters() -> None:
     assert list_all_token_types("()[]{},:") == [
-        TokenType.LPAREN,
-        TokenType.RPAREN,
-        TokenType.LBRACKET,
-        TokenType.RBRACKET,
-        TokenType.LBRACE,
-        TokenType.RBRACE,
+        TokenType.LEFT_PARENTHESIS,
+        TokenType.RIGHT_PARENTHESIS,
+        TokenType.LEFT_BRACKET,
+        TokenType.RIGHT_BRACKET,
+        TokenType.LEFT_BRACE,
+        TokenType.RIGHT_BRACE,
         TokenType.COMMA,
         TokenType.COLON,
     ]
+
+
+### Test literals
+
+## Test booleans
+
+
+@pytest.mark.parametrize(("source", "value"), [("true", True), ("false", False)])
+def test_booleans(source: str, value: bool) -> None:
+    token = expect_single_token(source)
+    assert token.type is TokenType.BOOLEAN
+    assert token.value is value
 
 
 ### Test names
@@ -160,6 +177,7 @@ def test_name_errors(source: str, fragment: str) -> None:
         "case",
         "let",
         "in",
+        "const",
     ],
 )
 def test_keywords(source: str) -> None:
@@ -180,11 +198,13 @@ def test_symbols(source: str) -> None:
 @pytest.mark.parametrize(
     ("source", "type"),
     [
-        ("T", TokenType.TYPE_VAR),
-        ("Q1", TokenType.TYPE_VAR),
-        ("Q10", TokenType.TYPE_VAR),
+        ("T", TokenType.TYPE_VARIABLE),
+        ("Q1", TokenType.TYPE_VARIABLE),
+        ("Q10", TokenType.TYPE_VARIABLE),
         ("Shape", TokenType.TYPE_NAME),
         ("Rect3D", TokenType.TYPE_NAME),
+        ("Io", TokenType.TYPE_NAME),
+        ("IoError", TokenType.TYPE_NAME),
     ],
 )
 def test_type_variables_and_type_names(source: str, type: TokenType) -> None:
@@ -197,9 +217,10 @@ def test_type_variables_and_type_names(source: str, type: TokenType) -> None:
         ("Shape_x", "letters and digits"),
         ("Foo-bar", "letters and digits"),
         ("Foo?", "letters and digits"),
+        ("Max_depth", "letters and digits"),
     ],
 )
-def test_type_name_errors(source: str, fragment: TokenType) -> None:
+def test_type_name_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
@@ -209,10 +230,10 @@ def test_type_name_errors(source: str, fragment: TokenType) -> None:
 @pytest.mark.parametrize(
     ("source", "type"),
     [
-        ("..a", TokenType.ROW_VAR),
-        ("..rest", TokenType.ROW_VAR),
-        ("..a2", TokenType.ROW_VAR),
-        ("..aB", TokenType.ROW_VAR),
+        ("..a", TokenType.ROW_VARIABLE),
+        ("..rest", TokenType.ROW_VARIABLE),
+        ("..a2", TokenType.ROW_VARIABLE),
+        ("..aB", TokenType.ROW_VARIABLE),
     ],
 )
 def test_row_variable_names(source: str, type: TokenType) -> None:
@@ -229,5 +250,35 @@ def test_row_variable_names(source: str, type: TokenType) -> None:
         ("...", "letters and digits"),
     ],
 )
-def test_row_variable_errors(source: str, fragment: TokenType) -> None:
+def test_row_variable_errors(source: str, fragment: str) -> None:
+    assert fragment in get_failure_message(source)
+
+
+### Test constant names
+
+
+@pytest.mark.parametrize(
+    ("source", "type"),
+    [
+        ("IO", TokenType.CONSTANT_NAME),
+        ("NEWLINE", TokenType.CONSTANT_NAME),
+        ("MAX_DEPTH", TokenType.CONSTANT_NAME),
+        ("TAB2", TokenType.CONSTANT_NAME),
+        ("A_", TokenType.CONSTANT_NAME),
+        ("Q1A", TokenType.CONSTANT_NAME),
+    ],
+)
+def test_constant_names(source: str, type: TokenType) -> None:
+    assert expect_single_token(source).type is type
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("NEW-LINE", "letters, digits and underscores"),
+        ("ABC123#", "letters, digits and underscores"),
+        ("AND+OR", "letters, digits and underscores"),
+    ],
+)
+def test_constant_name_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
