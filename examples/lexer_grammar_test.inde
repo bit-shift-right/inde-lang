@@ -15,3 +15,4 @@ if end else while do const
 Shape T Q1 Q10 Rect3D
 true false
 CONSTANT_NAME123
+"say \"hi\""

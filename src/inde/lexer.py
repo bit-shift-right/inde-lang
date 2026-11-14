@@ -18,6 +18,7 @@ class TokenType(Enum):
     COLON = auto()
 
     # Literals
+    STRING = auto()
     BOOLEAN = auto()
 
     # Words
@@ -69,9 +70,15 @@ VALID_KEYWORDS: tuple[str, ...] = (
 VALID_SYMBOLS: tuple[str, ...] = ("?", "&", "|", "=", "->")
 
 
-VALID_CONSTANT_NAME_CHARACTERS: set[str] = set(
-    '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_'
-)
+VALID_STRING_ESCAPES: dict[str, str] = {
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    "0": "\0",
+    "\\": "\\",
+    "'": "'",
+    '"': '"',
+}
 
 
 @dataclass
@@ -188,6 +195,61 @@ class Lexer:
             else:
                 return
 
+    def read_escape(self, token_start: Location, token_name_string: str) -> str:
+        escape_start = self.get_location()
+        self.advance()
+
+        if self.at_end():
+            self.fail(f"unterminated {token_name_string} literal", token_start)
+
+        current_character = self.peek()
+
+        if current_character == "\n" or current_character == "\r":
+            self.fail(
+                f"line breaks not allowed inside of {token_name_string} literals",
+                token_start,
+            )
+
+        self.advance()
+
+        if current_character in VALID_STRING_ESCAPES:
+            return VALID_STRING_ESCAPES[current_character]
+
+        self.fail(f"unknown escape sequence \\{current_character}", escape_start)
+
+    def read_quoted(
+        self, token_start: Location, delimiter: str, token_name_string: str
+    ) -> list[str]:
+        self.advance()
+        character_buffer: list[str] = []
+        while True:
+            if self.at_end():
+                self.fail(f"unterminated {token_name_string} literal", token_start)
+
+            current_character = self.peek()
+
+            if current_character == delimiter:
+                self.advance()
+                return character_buffer
+
+            if current_character == "\n" or current_character == "\r":
+                self.fail(
+                    f"line breaks not allowed inside of {token_name_string} literals",
+                    token_start,
+                )
+
+            if current_character == "\\":
+                character_buffer.append(
+                    self.read_escape(token_start, token_name_string)
+                )
+
+            else:
+                character_buffer.append(self.advance())
+
+    def lex_string(self, token_start: Location) -> Token:
+        string_buffer = self.read_quoted(token_start, '"', "string")
+        return self.emit_token(TokenType.STRING, token_start, "".join(string_buffer))
+
     def lex_word(self, token_start: Location) -> Token:
         token_text = self.find_end_of_token(token_start)
 
@@ -262,6 +324,8 @@ class Lexer:
         if current_character in VALID_DELIMITERS:
             self.advance()
             return self.emit_token(VALID_DELIMITERS[current_character], token_start)
+        if current_character == '"':
+            return self.lex_string(token_start)
 
         return self.lex_word(token_start)
 

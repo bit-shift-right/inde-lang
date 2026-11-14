@@ -107,6 +107,44 @@ def test_delimiters() -> None:
 
 ### Test literals
 
+## Test Strings
+
+
+@pytest.mark.parametrize(
+    ("source", "value"),
+    [
+        ('"hello"', "hello"),
+        ('""', ""),
+        ('"héllo"', "héllo"),
+        (r'"a\nb"', "a\nb"),
+        (r'"tab\there"', "tab\there"),
+        (r'"a\0b"', "a\x00b"),
+        (r'"say \"hi\""', 'say "hi"'),
+        (r'"back\\slash"', "back\\slash"),
+        ('"it\'s"', "it's"),
+        ('"a;b"', "a;b"),
+    ],
+)
+def test_strings(source: str, value: str) -> None:
+    token = expect_single_token(source)
+    assert token.type is TokenType.STRING
+    assert token.value == value
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ('"abc', "unterminated string"),
+        ('"abc\\', "unterminated string"),
+        ('"a\nb"', "line break"),
+        ('"a\r\nb"', "line break"),
+        (r'"a\qb"', "unknown escape"),
+    ],
+)
+def test_string_errors(source: str, fragment: str) -> None:
+    assert fragment in get_failure_message(source)
+
+
 ## Test booleans
 
 
