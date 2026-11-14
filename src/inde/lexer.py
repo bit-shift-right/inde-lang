@@ -19,6 +19,7 @@ class TokenType(Enum):
 
     # Literals
     STRING = auto()
+    CHARACTER = auto()
     BOOLEAN = auto()
 
     # Words
@@ -79,6 +80,9 @@ VALID_STRING_ESCAPES: dict[str, str] = {
     "'": "'",
     '"': '"',
 }
+
+
+VALID_HEX_DIGITS: str = "0123456789abcdefABCDEF"
 
 
 @dataclass
@@ -215,6 +219,41 @@ class Lexer:
         if current_character in VALID_STRING_ESCAPES:
             return VALID_STRING_ESCAPES[current_character]
 
+        if current_character == "u":
+            if self.peek() != "{":
+                self.fail("expected { after unicode escape \\u", escape_start)
+
+            self.advance()
+
+            digits = ""
+            while self.peek() != "" and self.peek() in VALID_HEX_DIGITS:
+                digits += self.advance()
+
+            if self.peek() != "}":
+                self.fail("unterminated unicode escape \\u{...}", escape_start)
+
+            self.advance()
+
+            if not 1 <= len(digits) <= 6:
+                self.fail(
+                    "unicode escape \\u{...} "
+                    "must contain one to six hexadecimal digits",
+                    escape_start,
+                )
+
+            code = int(digits, 16)
+            if 0xD800 <= code <= 0xDFFF:
+                self.fail(
+                    f"U+{code:X} is a surrogate, not a Unicode scalar value",
+                    escape_start,
+                )
+            if code > 0x10FFFF:
+                self.fail(
+                    f"U+{code:X} is out of range; the maximum is U+10FFFF", escape_start
+                )
+
+            return chr(code)
+
         self.fail(f"unknown escape sequence \\{current_character}", escape_start)
 
     def read_quoted(
@@ -249,6 +288,18 @@ class Lexer:
     def lex_string(self, token_start: Location) -> Token:
         string_buffer = self.read_quoted(token_start, '"', "string")
         return self.emit_token(TokenType.STRING, token_start, "".join(string_buffer))
+
+    def lex_character(self, token_start: Location) -> Token:
+        character_buffer = self.read_quoted(token_start, "'", "character")
+        if len(character_buffer) == 0:
+            self.fail("empty character literal", token_start)
+        if len(character_buffer) > 1:
+            self.fail(
+                "a character literal may only contain a single scalar value; "
+                f"found `{''.join(character_buffer)}`",
+                token_start,
+            )
+        return self.emit_token(TokenType.CHARACTER, token_start, character_buffer[0])
 
     def lex_word(self, token_start: Location) -> Token:
         token_text = self.find_end_of_token(token_start)
@@ -305,7 +356,7 @@ class Lexer:
                 return self.emit_token(TokenType.TYPE_NAME, token_start)
 
             self.fail(
-                f"`{token_text}` is not a valid name: "
+                f"`{token_text}` is not a valid name; "
                 f"a type name may only contain letters and digits and "
                 f"a constant name may only contain letters, digits and underscores",
                 token_start,
@@ -326,6 +377,8 @@ class Lexer:
             return self.emit_token(VALID_DELIMITERS[current_character], token_start)
         if current_character == '"':
             return self.lex_string(token_start)
+        if current_character == "'":
+            return self.lex_character(token_start)
 
         return self.lex_word(token_start)
 

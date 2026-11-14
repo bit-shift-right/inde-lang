@@ -107,7 +107,7 @@ def test_delimiters() -> None:
 
 ### Test literals
 
-## Test Strings
+## Test strings
 
 
 @pytest.mark.parametrize(
@@ -123,6 +123,7 @@ def test_delimiters() -> None:
         (r'"back\\slash"', "back\\slash"),
         ('"it\'s"', "it's"),
         ('"a;b"', "a;b"),
+        (r'"\u{1F600}"', "\U0001f600"),
     ],
 )
 def test_strings(source: str, value: str) -> None:
@@ -139,9 +140,53 @@ def test_strings(source: str, value: str) -> None:
         ('"a\nb"', "line break"),
         ('"a\r\nb"', "line break"),
         (r'"a\qb"', "unknown escape"),
+        (r'"x\u41"', "expected {"),
+        (r'"x\u{41"', "unterminated unicode"),
+        (r'"x\u{}"', "one to six"),
+        (r'"x\u{1234567}"', "one to six"),
+        (r'"\u{D800}"', "surrogate"),
+        (r'"\u{110000}"', "out of range"),
     ],
 )
 def test_string_errors(source: str, fragment: str) -> None:
+    assert fragment in get_failure_message(source)
+
+
+## Test characters
+
+
+@pytest.mark.parametrize(
+    ("source", "value"),
+    [
+        ("'a'", "a"),
+        ("'é'", "é"),
+        ("' '", " "),
+        ("'\"'", '"'),
+        (r"'\n'", "\n"),
+        (r"'\''", "'"),
+        (r"'\\'", "\\"),
+        (r"'\u{1F600}'", "\U0001f600"),
+    ],
+)
+def test_characters(source: str, value: str) -> None:
+    token = expect_single_token(source)
+    assert token.type is TokenType.CHARACTER
+    assert token.value == value
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("''", "empty character"),
+        ("'ab'", "contain a single"),
+        ("'é'", "contain a single"),
+        ("'a", "unterminated character"),
+        ("'\n'", "line break"),
+        (r"'\q'", "unknown escape"),
+        (r"'\u{D800}'", "surrogate"),
+    ],
+)
+def test_character_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
