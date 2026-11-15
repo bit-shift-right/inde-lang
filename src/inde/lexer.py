@@ -70,7 +70,7 @@ class NumberType(Enum):
         return 0, (1 << bits) - 1
 
 
-@dataclass
+@dataclass(frozen=True)
 class NumberValue:
     number: int | float
     type: NumberType
@@ -132,14 +132,14 @@ def is_decimal_digit(character: str) -> bool:
     return character != "" and character in VALID_DECIMAL_DIGITS
 
 
-@dataclass
+@dataclass(frozen=True)
 class Location:
     line: int
     column: int
     cursor: int
 
 
-@dataclass
+@dataclass(frozen=True)
 class Token:
     type: TokenType
     text: str
