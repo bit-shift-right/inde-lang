@@ -1,8 +1,10 @@
+import math
+import struct
 from typing import Any
 
 import pytest
 
-from inde.lexer import Token, TokenType, tokenize
+from inde.lexer import NumberType, Token, TokenType, tokenize
 
 
 def list_all_token_types(source: str) -> list[TokenType]:
@@ -24,6 +26,10 @@ def get_failure_message(source: str) -> Any:
         tokenize(source)
 
     return err.value.args[0]
+
+
+def as_f32(x: float) -> float:
+    return float(struct.unpack("f", struct.pack("f", x))[0])
 
 
 ### Test general lexer functionality
@@ -106,6 +112,127 @@ def test_delimiters() -> None:
 
 
 ### Test literals
+
+## Test integers
+
+
+@pytest.mark.parametrize(
+    ("source", "number", "number_type"),
+    [
+        ("42", 42, NumberType.I32),
+        ("0", 0, NumberType.I32),
+        ("-0", 0, NumberType.I32),
+        ("-17", -17, NumberType.I32),
+        ("+17", 17, NumberType.I32),
+        ("1_000_000", 1_000_000, NumberType.I32),
+        ("255u8", 255, NumberType.U8),
+        ("-128i8", -128, NumberType.I8),
+        ("+127i8", 127, NumberType.I8),
+        ("3000000000i64", 3_000_000_000, NumberType.I64),
+        ("-1_000i64", -1000, NumberType.I64),
+        ("0XFF", 255, NumberType.I32),
+        ("0xff", 255, NumberType.I32),
+        ("-0xFF", -255, NumberType.I32),
+        ("0xFFu8", 255, NumberType.U8),
+        ("0xFFFFFFFFu32", 4_294_967_295, NumberType.U32),
+        ("0b1010", 10, NumberType.I32),
+        ("0X1f32", 7986, NumberType.I32),
+    ],
+)
+def test_integers(source: str, number: int, number_type: NumberType) -> None:
+    token = expect_single_token(source)
+    assert token.type is TokenType.INTEGER
+    assert token.value.number == number  # type: ignore[attr-defined]
+    assert token.value.type is number_type  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("300u8", "out of range for type u8"),
+        ("-1u8", "out of range for type u8"),
+        ("128i8", "out of range for type i8"),
+        ("-129i8", "out of range for type i8"),
+        ("+128i8", "out of range for type i8"),
+        ("2147483648", "out of range for type i32"),
+        ("-2147483649", "out of range for type i32"),
+        ("0xFFFFFFFF", "out of range for type i32"),
+        ("007", "leading zero"),
+        ("1__000", "underscores"),
+        ("1_", "underscores"),
+        ("0x_FF", "underscores"),
+        ("5U8", "lowercase"),
+        ("5u7", "unknown type suffix"),
+        ("5sz", "reserved"),
+        ("1f32", "float suffix on"),
+        ("0b1f32", "only be integer types"),
+        ("0b102", "invalid digit"),
+        ("0x", "expected only hexadecimal digits"),
+        ("0xFFg", "unknown type suffix"),
+        ("5-3", "invalid number"),
+        ("5-3", "invalid number"),
+    ],
+)
+def test_integer_errors(source: str, fragment: str) -> None:
+    assert fragment in get_failure_message(source)
+
+
+## Test floats
+
+
+@pytest.mark.parametrize(
+    ("source", "number", "number_type"),
+    [
+        ("1.5", 1.5, NumberType.F32),
+        ("0.5", 0.5, NumberType.F32),
+        ("0.1", as_f32(0.1), NumberType.F32),
+        ("1e9", 1e9, NumberType.F32),
+        ("1e+3", 1000.0, NumberType.F32),
+        ("1.5f64", 1.5, NumberType.F64),
+        ("2.5e-3f64", 0.0025, NumberType.F64),
+        ("3.4028235e38", as_f32(3.4028235e38), NumberType.F32),
+        ("1e-45", as_f32(1e-45), NumberType.F32),
+        ("1E9", 1e9, NumberType.F32),
+        ("2.5E-3f64", 0.0025, NumberType.F64),
+    ],
+)
+def test_floats(source: str, number: int, number_type: NumberType) -> None:
+    token = expect_single_token(source)
+    assert token.type is TokenType.FLOAT
+    assert token.value.number == number  # type: ignore[attr-defined]
+    assert token.value.type is number_type  # type: ignore[attr-defined]
+
+
+def test_negative_zero_keeps_its_sign() -> None:
+    number = expect_single_token("-0.0").value.number  # type: ignore[attr-defined]
+    assert number == 0.0
+    assert math.copysign(1.0, number) == -1.0
+
+
+def test_f32_rounds_once_not_twice() -> None:
+    # Should round down to 1.0
+    token = expect_single_token("1.000000059604644775390625001")
+    assert token.value.number == 1.0 + 2.0**-23  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("1.", "after the point"),
+        ("1e", "after `e`"),
+        ("1e+", "after `e+`"),
+        ("1.5i32", "integer suffix on a float"),
+        ("1.5.3", "invalid"),
+        ("1e99", "literal overflows"),
+        ("1e400f64", "overflows f64"),
+        ("1e-60", "rounds to zero"),
+        ("1E", "after `E`"),
+        ("1.5E9F64", "lowercase"),
+    ],
+)
+def test_float_errors(source: str, fragment: str) -> None:
+    assert fragment in get_failure_message(source)
+
 
 ## Test strings
 
