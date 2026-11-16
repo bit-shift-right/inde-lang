@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import (
-    dataclass,
-    field,
-)
+from dataclasses import MISSING, dataclass, field, fields, is_dataclass
+from enum import Enum
+from typing import TYPE_CHECKING
 
 from inde.lexer import Location, NumberType
+
+if TYPE_CHECKING:
+    from _typeshed import DataclassInstance
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -87,6 +89,11 @@ class BooleanLiteral(Node):
 
 
 @dataclass(frozen=True, kw_only=True)
+class ConstantReference(Node):
+    name: str
+
+
+@dataclass(frozen=True, kw_only=True)
 class ArrayLiteral(Node):
     elements: tuple[Literal, ...]
 
@@ -136,7 +143,7 @@ class ConstructorPattern(Node):
 
 @dataclass(frozen=True, kw_only=True)
 class LiteralPattern(Node):
-    literal: Literal
+    literal: Literal | ConstantReference
 
 
 Pattern = ConstructorPattern | LiteralPattern
@@ -168,6 +175,7 @@ Item = (
     | BooleanLiteral
     | ArrayLiteral
     | WordReference
+    | ConstantReference
     | Propagate
     | Quotation
     | If
@@ -202,9 +210,60 @@ class TypeDeclaration(Node):
     linear: bool = False
 
 
-Declaration = WordDeclaration | TypeDeclaration
+@dataclass(frozen=True, kw_only=True)
+class ConstantDeclaration(Node):
+    name: str
+    value: Literal
+
+
+Declaration = WordDeclaration | TypeDeclaration | ConstantDeclaration
 
 
 @dataclass(frozen=True, kw_only=True)
 class Program(Node):
-    decls: tuple[Declaration, ...] = ()
+    declarations: tuple[Declaration, ...] = ()
+
+
+def dump(node: DataclassInstance, indent: str = "  ") -> str:
+    lines: list[str] = []
+
+    def is_node(value: DataclassInstance) -> bool:
+        return is_dataclass(value) and not isinstance(value, type)
+
+    def scalar(value: DataclassInstance) -> str:
+        if isinstance(value, Enum):
+            return str(value.value)
+        return repr(value)
+
+    def visit(value: DataclassInstance, depth: int, label: str) -> None:
+        prefix = indent * depth + (f"{label}: " if label else "")
+        if is_node(value):
+            children: list[tuple[str, DataclassInstance]] = []
+            attributes: list[str] = []
+            for f in fields(value):
+                if f.name == "span":
+                    continue
+                v = getattr(value, f.name)
+                if f.default is not MISSING and v == f.default:
+                    continue
+                if is_node(v) or (isinstance(v, tuple) and v and is_node(v[0])):
+                    children.append((f.name, v))
+                else:
+                    attributes.append(f"{f.name}={scalar(v)}")
+            lines.append(
+                prefix
+                + type(value).__name__
+                + ("" if not attributes else " " + " ".join(attributes))
+            )
+            for name, child in children:
+                if isinstance(child, tuple):
+                    lines.append(indent * (depth + 1) + f"{name}:")
+                    for item in child:
+                        visit(item, depth + 2, "")
+                else:
+                    visit(child, depth + 1, name)
+        else:
+            lines.append(prefix + scalar(value))
+
+    visit(node, 0, "")
+    return "\n".join(lines)

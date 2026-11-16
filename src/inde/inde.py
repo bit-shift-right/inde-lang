@@ -1,16 +1,16 @@
 from pathlib import Path
 
-from inde import lexer
+from inde import ast, parser
 
 PROGRAM_NAME = Path(__file__).stem
 
 
 def main() -> None:
-    with open("./examples/lexer_grammar_test.inde", "r+") as source_file:
+    with open("./examples/parser_demo_test.inde", "r+") as source_file:
         source = source_file.read()
 
-    source_tokens = lexer.tokenize(source, PROGRAM_NAME)
-    lexer.dump_tokens(source_tokens)
+    parsed_program = parser.parse(source, PROGRAM_NAME)
+    print(ast.dump(parsed_program))
 
 
 if __name__ == "__main__":
