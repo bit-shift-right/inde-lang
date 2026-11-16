@@ -1,5 +1,10 @@
+import os
 import platform
+import sys
 from enum import Enum
+from typing import TextIO
+
+from inde.errors import IndeError
 
 
 class Color(Enum):
@@ -14,6 +19,15 @@ class Color(Enum):
     DEFAULT = 39
 
 
+def supports_color(stream: TextIO) -> bool:
+    system = platform.system()
+    if system == "Windows" or system == "":
+        return False  # Don't support text decoration on these platforms
+    if "NO_COLOR" in os.environ:
+        return False
+    return stream.isatty()
+
+
 def decorate_text(
     text: str,
     foreground_color: Color = Color.DEFAULT,
@@ -22,10 +36,10 @@ def decorate_text(
     italic: bool = False,
     underline: bool = False,
     strikethrough: bool = False,
+    stream: TextIO | None = None,
 ) -> str:
-    system = platform.system()
-    if system == "Windows" or system == "":
-        return text  # Don't support text decoration on these platforms
+    if not supports_color(stream or sys.stderr):
+        return text
     start_code = "\x1b["
     reset_code = "\x1b[0m"
 
@@ -44,5 +58,19 @@ def decorate_text(
     return start_code + text + reset_code
 
 
-def format_error(header: str, message: str) -> str:
-    return f"{header}{decorate_text('error:', Color.RED)} {message}"
+def format_error(
+    source_name: str, error: IndeError, stream: TextIO | None = None
+) -> str:
+    header = source_name
+    if error.location is not None:
+        header += f":{error.location.line}:{error.location.column}"
+    label = decorate_text("error:", Color.RED, stream=stream)
+    return f"{header}: {label} {error.message}"
+
+
+def report_errors(
+    source_name: str, errors: list[IndeError], stream: TextIO | None = None
+) -> None:
+    stream = stream or sys.stderr
+    for error in errors:
+        print(format_error(source_name, error, stream), file=stream)

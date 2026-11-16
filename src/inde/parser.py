@@ -1,7 +1,5 @@
-from pathlib import Path
 from typing import NoReturn
 
-from inde import logger
 from inde.ast import (
     ArrayLiteral,
     Body,
@@ -40,6 +38,7 @@ from inde.ast import (
     WordDeclaration,
     WordReference,
 )
+from inde.errors import IndeError, IndeErrors
 from inde.lexer import (
     VALID_DELIMITERS,
     Location,
@@ -123,11 +122,10 @@ LITERAL_TYPES: tuple[TokenType, ...] = (
 
 
 class Parser:
-    def __init__(self, tokens: list[Token], program_name: str) -> None:
+    def __init__(self, tokens: list[Token]) -> None:
         self.tokens = tokens
-        self.program_name = program_name
         self.position = 0
-        self.errors: list[SystemExit] = []
+        self.errors: list[IndeError] = []
         self.arguments = collect_type_arguments(tokens)
         self.location = Location(0, 0, 0)
 
@@ -140,14 +138,8 @@ class Parser:
             self.position += 1
         return token
 
-    def error(self, message: str, token: Token | None = None) -> SystemExit:
-        _location = (token or self.peek()).location
-        return SystemExit(
-            logger.format_error(
-                f"{self.program_name}:{_location.line}:{_location.column}: ",
-                message,
-            )
-        )
+    def error(self, message: str, token: Token | None = None) -> IndeError:
+        return IndeError(message, (token or self.peek()).location)
 
     def fail(self, message: str, token: Token | None = None) -> NoReturn:
         raise self.error(message, token)
@@ -188,21 +180,21 @@ class Parser:
             else:
                 error_description = f"a {TYPE_WORDS[type]}"
         self.fail(
-            f"expected {error_description}, found {{self.describe_token(self.peek())}}"
+            f"expected {error_description}, found {self.describe_token(self.peek())}"
         )
 
     def expect_end(self, construct: str, opener: Token) -> Token:
         if self.at_keyword("end"):
             return self.advance()
         self.fail(
-            f"expected `end` to close `{construct}` on line {opener.location.line}"
+            f"expected `end` to close the {construct} on line {opener.location.line}"
         )
 
     def expect_closing(self, type: TokenType, construct: str, opener: Token) -> Token:
         if self.at_token(type):
             return self.advance()
         self.fail(
-            f"expected `{DELIMITERS_TEXT[type]}` to close `{construct}` on "
+            f"expected `{DELIMITERS_TEXT[type]}` to close the {construct} on "
             f"line {opener.location.line}"
         )
 
@@ -237,7 +229,8 @@ class Parser:
                         self.error(
                             f"code outside a declaration, "
                             f"found {self.describe_token(token)}; "
-                            "a file contains only `word` and `type` declarations"
+                            "a file contains only `word`, `type` and `const` "
+                            "declarations"
                         )
                     )
                 self.advance()
@@ -246,7 +239,7 @@ class Parser:
             before = self.position
             try:
                 declarations.append(self.parse_declaration())
-            except SystemExit as error:
+            except IndeError as error:
                 self.errors.append(error)
                 if self.position == before:
                     self.advance()
@@ -339,7 +332,7 @@ class Parser:
         self.expect_token(closer)
         if (inputs.row is None) != (outputs.row is None):
             self.fail(
-                "both sides of a stack effect must name a row variable",
+                "both sides of a stack effect must name a row variable, or neither",
                 opener,
             )
         return StackEffect(inputs=inputs, outputs=outputs, location=opener.location)
@@ -519,7 +512,7 @@ class Parser:
             if not self.starts_type():
                 self.fail(
                     f"`{name.text}( )` lists no fields; "
-                    "write `{name.text}` for a variant without fields"
+                    f"write `{name.text}` for a variant without fields"
                 )
             while self.starts_type():
                 fields.append(self.parse_type())
@@ -604,16 +597,26 @@ class Parser:
 
     def parse_array_literal(self, consts_allowed: bool = True) -> ArrayLiteral:
         opener = self.expect_token(TokenType.LEFT_BRACE)
-        elements: list[Literal] = []
+        elements: list[Literal | ConstantReference] = []
         while not self.at_token(TokenType.RIGHT_BRACE):
             token = self.peek()
             if token.type in LITERAL_TYPES or token.type is TokenType.LEFT_BRACE:
                 elements.append(self.parse_literal(consts_allowed))
+            elif token.type is TokenType.CONSTANT_NAME:
+                if not consts_allowed:
+                    self.fail(
+                        "a constant's value is a literal, not another constant "
+                        f"(`{token.text}`)"
+                    )
+                self.advance()
+                elements.append(
+                    ConstantReference(name=token.text, location=token.location)
+                )
             elif token.type is TokenType.END_OF_FILE:
                 break
             else:
                 self.fail(
-                    "array literal elements must be literals, "
+                    "array literal elements must be literals or constants, "
                     f"found {self.describe_token(token)}"
                 )
         self.expect_closing(TokenType.RIGHT_BRACE, "array literal", opener)
@@ -728,9 +731,13 @@ class Parser:
         return result
 
 
-def parse(source: str, program_name: str = Path(__file__).stem) -> Program:
-    parser = Parser(tokenize(source, program_name), program_name)
+def parse(source: str) -> Program:
+    try:
+        tokens = tokenize(source)
+    except IndeError as error:
+        raise IndeErrors([error]) from None
+    parser = Parser(tokens)
     program = parser.parse_program()
     if parser.errors:
-        raise parser.errors[0]
+        raise IndeErrors(parser.errors)
     return program

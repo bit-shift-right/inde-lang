@@ -2,10 +2,9 @@ import math
 from dataclasses import dataclass
 from enum import Enum, auto
 from fractions import Fraction
-from pathlib import Path
 from typing import NoReturn
 
-from inde import logger
+from inde.errors import IndeError
 
 
 class TokenType(Enum):
@@ -148,21 +147,13 @@ class Token:
 
 
 class NumberParser:
-    def __init__(
-        self, number_string: str, location: Location, program_name: str
-    ) -> None:
+    def __init__(self, number_string: str, location: Location) -> None:
         self.number_string = number_string
         self.location = location
-        self.program_name = program_name
         self.cursor = 0
 
     def fail(self, message: str) -> NoReturn:
-        raise SystemExit(
-            logger.format_error(
-                f"{self.program_name}:{self.location.line}:{self.location.column}: ",
-                message,
-            )
-        )
+        raise IndeError(message, self.location)
 
     def peek(self, ahead: int = 0) -> str:
         peek_cursor = self.cursor + ahead
@@ -215,9 +206,8 @@ class NumberParser:
             VALID_HEXADECIMAL_DIGITS if radix == 16 else VALID_BINARY_DIGITS
         )
         if digits == "":
-            self.fail(
-                f"expected only {name} digits after `0{'x' if radix == 16 else 'b'}`"
-            )
+            prefix = self.number_string[self.cursor - 2 : self.cursor]
+            self.fail(f"expected only {name} digits after `{prefix}`")
         if radix == 2 and is_decimal_digit(self.peek()):
             self.fail(f"invalid digit `{self.peek()}` in binary literal")
 
@@ -339,19 +329,14 @@ class NumberParser:
 
 
 class Lexer:
-    def __init__(self, source: str, program_name: str) -> None:
+    def __init__(self, source: str) -> None:
         self.source = source
-        self.program_name = program_name
         self.cursor = 0
         self.line = 1
         self.column = 1
 
     def fail(self, message: str, location: Location) -> NoReturn:
-        raise SystemExit(
-            logger.format_error(
-                f"{self.program_name}:{location.line}:{location.column}: ", message
-            )
-        )
+        raise IndeError(message, location)
 
     def at_end(self, ahead: int = 0) -> bool:
         return (self.cursor + ahead) >= len(self.source)
@@ -380,6 +365,7 @@ class Lexer:
         return (
             character == ""
             or character in VALID_WHITESPACE
+            or character == "\r"
             or character in VALID_DELIMITERS
             or character in "'\";"
         )
@@ -525,7 +511,7 @@ class Lexer:
 
     def lex_number(self, token_start: Location) -> Token:
         token_text = self.find_end_of_token(token_start)
-        type, value = NumberParser(token_text, token_start, self.program_name).parse()
+        type, value = NumberParser(token_text, token_start).parse()
         return self.emit_token(type, token_start, value)
 
     def lex_string(self, token_start: Location) -> Token:
@@ -601,7 +587,8 @@ class Lexer:
             self.fail(
                 f"`{token_text}` is not a valid name; "
                 f"a type name may only contain letters and digits and "
-                f"a constant name may only contain letters, digits and underscores",
+                f"a constant name may only contain uppercase letters, digits and "
+                f"underscores",
                 token_start,
             )
 
@@ -638,8 +625,8 @@ class Lexer:
                 return tokens
 
 
-def tokenize(source: str, program_name: str = Path(__file__).stem) -> list[Token]:
-    return Lexer(source, program_name).get_tokens()
+def tokenize(source: str) -> list[Token]:
+    return Lexer(source).get_tokens()
 
 
 def dump_tokens(tokens: list[Token]) -> None:

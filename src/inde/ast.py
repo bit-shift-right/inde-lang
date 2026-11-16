@@ -95,7 +95,7 @@ class ConstantReference(Node):
 
 @dataclass(frozen=True, kw_only=True)
 class ArrayLiteral(Node):
-    elements: tuple[Literal, ...]
+    elements: tuple[Literal | ConstantReference, ...]
 
 
 Literal = (
@@ -241,7 +241,7 @@ def dump(node: DataclassInstance, indent: str = "  ") -> str:
             children: list[tuple[str, DataclassInstance]] = []
             attributes: list[str] = []
             for f in fields(value):
-                if f.name == "span":
+                if f.name == "location":
                     continue
                 v = getattr(value, f.name)
                 if f.default is not MISSING and v == f.default:

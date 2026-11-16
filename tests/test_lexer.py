@@ -1,9 +1,9 @@
 import math
 import struct
-from typing import Any
 
 import pytest
 
+from inde.errors import IndeError
 from inde.lexer import NumberType, Token, TokenType, tokenize
 
 
@@ -21,11 +21,11 @@ def expect_single_token(source: str) -> Token:
     return tokens[0]
 
 
-def get_failure_message(source: str) -> Any:
-    with pytest.raises(SystemExit) as err:
+def get_failure_message(source: str) -> str:
+    with pytest.raises(IndeError) as err:
         tokenize(source)
 
-    return err.value.args[0]
+    return err.value.message
 
 
 def as_f32(x: float) -> float:
@@ -93,6 +93,16 @@ def test_line_numbers_after_block_comment() -> None:
 )
 def test_block_comments(source: str, expected: list[str]) -> None:
     assert list_all_token_texts(source) == expected
+
+
+def test_crlf_ends_a_word_or_number() -> None:
+    # The carriage return must not become part of the token before it.
+    assert list_all_token_texts("dup\r\nswap") == ["dup", "swap"]
+    assert list_all_token_texts("5\r\n6u8\r\n") == ["5", "6u8"]
+    assert list_all_token_texts("; comment\r\ndup") == ["dup"]
+    token = tokenize("dup\r\nswap")[1]
+    assert (token.location.line, token.location.column) == (2, 1)
+    assert "lone carriage return" in get_failure_message("dup\rswap")
 
 
 ### Test delimiters
@@ -167,10 +177,12 @@ def test_integers(source: str, number: int, number_type: NumberType) -> None:
         ("1f32", "float suffix on"),
         ("0b1f32", "only be integer types"),
         ("0b102", "invalid digit"),
-        ("0x", "expected only hexadecimal digits"),
+        ("0x", "expected only hexadecimal digits after `0x`"),
+        ("0X", "expected only hexadecimal digits after `0X`"),
+        ("0B2", "expected only binary digits after `0B`"),
         ("0xFFg", "unknown type suffix"),
         ("5-3", "invalid number"),
-        ("5-3", "invalid number"),
+        ("5+3", "invalid number"),
     ],
 )
 def test_integer_errors(source: str, fragment: str) -> None:
@@ -485,9 +497,9 @@ def test_constant_names(source: str, type: TokenType) -> None:
 @pytest.mark.parametrize(
     ("source", "fragment"),
     [
-        ("NEW-LINE", "letters, digits and underscores"),
-        ("ABC123#", "letters, digits and underscores"),
-        ("AND+OR", "letters, digits and underscores"),
+        ("NEW-LINE", "uppercase letters, digits and underscores"),
+        ("ABC123#", "uppercase letters, digits and underscores"),
+        ("AND+OR", "uppercase letters, digits and underscores"),
     ],
 )
 def test_constant_name_errors(source: str, fragment: str) -> None:
