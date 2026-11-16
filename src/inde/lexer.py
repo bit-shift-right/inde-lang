@@ -122,6 +122,21 @@ VALID_STRING_ESCAPES: dict[str, str] = {
 }
 
 
+def quote(text: str, delimiter: str) -> str:
+    written = {value: f"\\{name}" for name, value in VALID_STRING_ESCAPES.items()}
+    parts: list[str] = []
+    for character in text:
+        if character in ("'", '"'):
+            parts.append("\\" + character if character == delimiter else character)
+        elif character in written:
+            parts.append(written[character])
+        elif not character.isprintable():
+            parts.append(f"\\u{{{ord(character):X}}}")
+        else:
+            parts.append(character)
+    return delimiter + "".join(parts) + delimiter
+
+
 VALID_DECIMAL_DIGITS = "0123456789"
 VALID_BINARY_DIGITS = "01"
 VALID_HEXADECIMAL_DIGITS: str = "0123456789abcdefABCDEF"

@@ -1,0 +1,48 @@
+type Shape = circle( f32 ) | rect( f32 f32 ) | dot
+
+const LIMIT = 5
+
+word area ( Shape -> f32 )
+  match
+    case circle dup * 3.14159 *
+    case rect *
+    case dot 0.0
+  end
+end
+
+word factorial ( i32 -> i32 )
+  dup 1 <= if
+    drop 1
+  else
+    dup 1 - factorial *
+  end
+end
+
+word sum-to ( i32 -> i32 )
+  0 swap
+  while dup 0 > do
+    let total n in
+      total n +
+      n 1 -
+    end
+  end
+  drop
+end
+
+word describe ( i32 -> str )
+  match
+    case 0 "zero"
+    case LIMIT "the limit"
+    else "something else"
+  end
+end
+
+word main ( -> )
+  2.0 circle area print
+  2.0 3.0 rect area print
+  10 factorial print
+  100 sum-to print
+  0 describe print
+  5 describe print
+  7 describe print
+end

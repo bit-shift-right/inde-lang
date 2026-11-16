@@ -1,0 +1,5 @@
+word main ( -> )
+  "before" print
+  2147483647 1 + print
+  "never printed" print
+end

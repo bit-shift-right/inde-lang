@@ -32,16 +32,10 @@ def as_f32(x: float) -> float:
     return float(struct.unpack("f", struct.pack("f", x))[0])
 
 
-### Test general lexer functionality
-
-
 def test_location_counts_lines_and_columns_from_one() -> None:
     tokens = tokenize("[\n  ]")
     assert (tokens[0].location.line, tokens[0].location.column) == (1, 1)
     assert (tokens[1].location.line, tokens[1].location.column) == (2, 3)
-
-
-### Test whitespace and comments
 
 
 def test_empty_source_only_contains_end_of_file() -> None:
@@ -63,7 +57,6 @@ def test_crlf_is_valid_line_break() -> None:
     [
         ("\r", "lone carriage return"),
         ("(   )", "printable ASCII"),  # a non-breaking space is not whitespace
-        # TODO: Test for other invalid whitespace
     ],
 )
 def test_invalid_whitespace(source: str, fragment: str) -> None:
@@ -82,7 +75,6 @@ def test_line_numbers_after_block_comment() -> None:
 @pytest.mark.parametrize(
     ("source", "expected"),
     [
-        # Try lexing ( or ) token each time to check for collisions
         ("(;( note ;))", ["(", ")"]),
         ("( ;( ) ;) )", ["(", ")"]),
         (";( a ;( b ;) (", ["("]),
@@ -96,16 +88,12 @@ def test_block_comments(source: str, expected: list[str]) -> None:
 
 
 def test_crlf_ends_a_word_or_number() -> None:
-    # The carriage return must not become part of the token before it.
     assert list_all_token_texts("dup\r\nswap") == ["dup", "swap"]
     assert list_all_token_texts("5\r\n6u8\r\n") == ["5", "6u8"]
     assert list_all_token_texts("; comment\r\ndup") == ["dup"]
     token = tokenize("dup\r\nswap")[1]
     assert (token.location.line, token.location.column) == (2, 1)
     assert "lone carriage return" in get_failure_message("dup\rswap")
-
-
-### Test delimiters
 
 
 def test_delimiters() -> None:
@@ -119,11 +107,6 @@ def test_delimiters() -> None:
         TokenType.COMMA,
         TokenType.COLON,
     ]
-
-
-### Test literals
-
-## Test integers
 
 
 @pytest.mark.parametrize(
@@ -189,9 +172,6 @@ def test_integer_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
-## Test floats
-
-
 @pytest.mark.parametrize(
     ("source", "number", "number_type"),
     [
@@ -246,9 +226,6 @@ def test_float_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
-## Test strings
-
-
 @pytest.mark.parametrize(
     ("source", "value"),
     [
@@ -291,9 +268,6 @@ def test_string_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
-## Test characters
-
-
 @pytest.mark.parametrize(
     ("source", "value"),
     [
@@ -329,17 +303,11 @@ def test_character_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
-## Test booleans
-
-
 @pytest.mark.parametrize(("source", "value"), [("true", True), ("false", False)])
 def test_booleans(source: str, value: bool) -> None:
     token = expect_single_token(source)
     assert token.type is TokenType.BOOLEAN
     assert token.value is value
-
-
-### Test names
 
 
 @pytest.mark.parametrize(
@@ -380,9 +348,6 @@ def test_name_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
-### Test keywords
-
-
 @pytest.mark.parametrize(
     "source",
     [
@@ -406,15 +371,9 @@ def test_keywords(source: str) -> None:
     assert expect_single_token(source).type is TokenType.KEYWORD
 
 
-### Test symbols
-
-
 @pytest.mark.parametrize("source", ["->", "?", "&", "|", "="])
 def test_symbols(source: str) -> None:
     assert expect_single_token(source).type is TokenType.SYMBOL
-
-
-### Test type variables and type names
 
 
 @pytest.mark.parametrize(
@@ -446,9 +405,6 @@ def test_type_name_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
-### Test row variables
-
-
 @pytest.mark.parametrize(
     ("source", "type"),
     [
@@ -474,9 +430,6 @@ def test_row_variable_names(source: str, type: TokenType) -> None:
 )
 def test_row_variable_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
-
-
-### Test constant names
 
 
 @pytest.mark.parametrize(

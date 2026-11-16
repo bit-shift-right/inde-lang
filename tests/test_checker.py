@@ -1,6 +1,3 @@
-from collections.abc import Callable
-from typing import Any, TypeVar
-
 import pytest
 
 from inde.checker import Checker, check
@@ -8,8 +5,6 @@ from inde.errors import IndeErrors
 from inde.lexer import tokenize
 from inde.parser import Parser, parse
 from inde.type_model import BOOL, I32, STR, U8, Effect, Type, array_of, option_of
-
-TestFunction = TypeVar("TestFunction", bound=Callable[..., Any])
 
 
 def effect_of(source: str, name: str) -> str:
@@ -61,7 +56,7 @@ def test_types_compare_by_value() -> None:
 
 def test_empty_program() -> None:
     checked = check(parse(""))
-    assert checked.words == {}
+    assert all(word.location is None for word in checked.words.values())
 
 
 def test_integer_literals_and_calls() -> None:
@@ -136,14 +131,8 @@ def test_errors_point_at_the_item() -> None:
     ("source", "fragment"),
     [
         ("word t ( -> ) [ 1 ] end", "quotations are not supported"),
-        ("word t ( -> ) if end end", "`if` forms are not supported"),
-        ("word t ( -> ) while do end end", "`while` forms are not supported"),
-        ("word t ( -> ) match case 1 else end end", "`match` forms are not"),
-        ("word t ( -> ) 1 let x in end end", "`let` forms are not supported"),
         ("word t ( -> ) ? end", "`?` forms are not supported"),
-        ("word t ( T -> T ) end", "type variables are not supported"),
         ("word t ( [ -> ] -> ) end", "quotation types are not supported"),
-        ("word t ( i32 -> i32 ) where T: Eq end", "`where` clauses are not"),
         ("word t ( ..a -> ..b ) end", "two different row variables"),
     ],
 )
@@ -171,10 +160,6 @@ def test_a_broken_signature_is_reported_once() -> None:
 
 def test_unknown_type() -> None:
     assert get_failure_message("word t ( Shape -> ) end") == "unknown type `Shape`"
-
-
-def test_library_constructors_wait_for_generics() -> None:
-    assert "`some` cannot be used yet" in body_fails("1 some")
 
 
 def test_signatures_accept_type_arguments() -> None:
@@ -220,7 +205,6 @@ def test_literal_types(literal: str, type_text: str) -> None:
         ("{ 1 2u8 }", "must have one type; found `i32` and `u8`"),
         ("{ 1 'a' }", "found `i32` and `char`"),
         ("{ { 1 } { 2u8 } }", "found `array[i32]` and `array[u8]`"),
-        ("{ }", "the element type of `{ }`"),
     ],
 )
 def test_array_literal_errors(body: str, fragment: str) -> None:
@@ -277,7 +261,6 @@ def test_builtins(body: str, inputs: str, outputs: str) -> None:
         ("1 2 +.ieee", "`+.ieee` takes two floats of the same type"),
         ("1u8 neg", "`neg` takes a signed integer or a float, found `u8`"),
         ("1u8 3 shl", "`shl` takes an integer and a `u32` amount"),
-        ('"a" "b" <', "two ordered values of the same type"),
         ("{ 1 } print", "`print` takes a value that can be displayed"),
         ("print", "`print` takes 1 value, but the stack is empty"),
     ],
@@ -447,10 +430,6 @@ def test_type_arguments() -> None:
             "type `Option` is already defined by the core library",
         ),
         ("type Two[T, T] = two( T T )", "type parameter `T` appears more than once"),
-        (
-            "type Tagged[T] = tagged( str T )\nword t ( -> ) 1 tagged end",
-            "`tagged` cannot be used yet: the constructors of `Tagged` need generics",
-        ),
     ],
 )
 def test_type_errors(source: str, fragment: str) -> None:
@@ -561,7 +540,6 @@ def test_types_with_parameters_can_be_linear() -> None:
         "type Holder[T] = holder( strbuf T )\n"
         "type Wrap[T] = wrap( Handle T )\n"
         "type Nested[T] = nested( Wrap[T] )\n"
-        "type Once[T] = once( linear [ T -> T ] )\n"
         "type Tagged[T] = tagged( str T )\n"
     )
     assert check(parse(source)).linear_types == {
@@ -569,9 +547,8 @@ def test_types_with_parameters_can_be_linear() -> None:
         "Holder",
         "Wrap",
         "Nested",
-        "Once",
     }
-    for name in ("Holder", "Wrap", "Nested", "Once"):
+    for name in ("Holder", "Wrap", "Nested"):
         message = get_failure_message(source + f"word t ( {name}[i32] -> ) drop end")
         assert f"cannot discard a value of the linear type `{name}[i32]`" in message
     check(parse(source + "word t ( Tagged[i32] -> ) drop end"))

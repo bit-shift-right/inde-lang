@@ -4,7 +4,7 @@ import sys
 from enum import Enum
 from typing import TextIO
 
-from inde.errors import IndeError
+from inde.errors import IndeError, IndeTrap
 
 
 class Color(Enum):
@@ -74,3 +74,16 @@ def report_errors(
     stream = stream or sys.stderr
     for error in errors:
         print(format_error(source_name, error, stream), file=stream)
+
+
+def format_trap(source_name: str, trap: IndeTrap, stream: TextIO | None = None) -> str:
+    header = source_name
+    if trap.location is not None:
+        header += f":{trap.location.line}:{trap.location.column}"
+    label = decorate_text("trap:", Color.RED, stream=stream)
+    return f"{header}: {label} {trap.message}"
+
+
+def report_trap(source_name: str, trap: IndeTrap, stream: TextIO | None = None) -> None:
+    stream = stream or sys.stderr
+    print(format_trap(source_name, trap, stream), file=stream)

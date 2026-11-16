@@ -4,7 +4,7 @@ import platform
 import pytest
 
 from inde import logger
-from inde.errors import IndeError, IndeErrors
+from inde.errors import IndeError, IndeErrors, IndeTrap
 from inde.lexer import Location
 from inde.parser import parse
 
@@ -44,7 +44,7 @@ def test_lexical_error_is_reported_alone() -> None:
 
 def test_format_names_the_source_file() -> None:
     error = IndeError("bad thing", Location(3, 7, 40))
-    plain = io.StringIO()  # not a terminal
+    plain = io.StringIO()
     assert (
         logger.format_error("examples/demo.inde", error, plain)
         == "examples/demo.inde:3:7: error: bad thing"
@@ -83,3 +83,14 @@ def test_report_errors_writes_one_line_per_error() -> None:
     assert stream.getvalue() == (
         "demo.inde:1:1: error: first\ndemo.inde:2:5: error: second\n"
     )
+
+
+def test_format_trap() -> None:
+    trap = IndeTrap("integer overflow in `+` (i32 1, i32 2)", Location(3, 7, 40))
+    assert str(trap) == "3:7: integer overflow in `+` (i32 1, i32 2)"
+    plain = io.StringIO()
+    assert logger.format_trap("demo.inde", trap, plain) == (
+        "demo.inde:3:7: trap: integer overflow in `+` (i32 1, i32 2)"
+    )
+    logger.report_trap("demo.inde", IndeTrap("call depth exceeded"), plain)
+    assert plain.getvalue() == "demo.inde: trap: call depth exceeded\n"

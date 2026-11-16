@@ -2,14 +2,14 @@ import sys
 from pathlib import Path
 
 from inde import checker, logger, parser
-from inde.errors import IndeErrors
+from inde.errors import IndeErrors, IndeTrap
+from inde.interpreter import Interpreter
+from inde.repl import run_repl
 
-DEFAULT_SOURCE = "./examples/checker_demo.inde"
+TRAP_STATUS = 2
 
 
-def main() -> int:
-    source_name = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_SOURCE
-
+def run_file(source_name: str) -> int:
     try:
         source = Path(source_name).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:
@@ -23,8 +23,19 @@ def main() -> int:
         logger.report_errors(source_name, failure.errors)
         return 1
 
-    for word in checked_program.words.values():
-        print(f"{word.name} {word.effect}")
+    interpreter = Interpreter(checked_program.words, checked_program.constants)
+    try:
+        return interpreter.run_main()
+    except IndeTrap as trap:
+        sys.stdout.flush()
+        logger.report_trap(source_name, trap)
+        return TRAP_STATUS
+
+
+def main() -> int:
+    if len(sys.argv) > 1:
+        return run_file(sys.argv[1])
+    run_repl()
     return 0
 
 

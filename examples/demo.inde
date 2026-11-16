@@ -10,12 +10,12 @@ word circle-area ( f32 -> f32 )
   square PI *
 end
 
-word unit-circle ( -> Shape )
-  1.0 circle
-end
-
 word main ( -> )
   2.0 circle-area print
   1 2 + 3 * print
+  0.1 0.2 + print
+  0.1f64 0.2f64 + print
+  200u8 100u8 +.sat print
+  -7 2 / print
   "done" print
 end

@@ -2,30 +2,40 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from inde.type_model import (
-    BOOL,
-    CHAR,
-    FLOAT_TYPES,
-    INTEGER_TYPES,
-    NUMBER_TYPES,
-    SIGNED_INTEGER_TYPES,
-    STR,
-    U32,
-    Effect,
-    Type,
-    option_of,
+from inde.type_model import BOOL, U32, UNIT, Effect, Type, option_of
+
+CONSTRAINTS: tuple[str, ...] = (
+    "Unrestricted",
+    "Integer",
+    "Signed",
+    "Float",
+    "Num",
+    "Eq",
+    "PartialEq",
+    "Ord",
+    "PartialOrd",
+    "Display",
 )
+
+IMPLIED_CONSTRAINTS: dict[str, tuple[str, ...]] = {
+    "Signed": ("Integer",),
+    "Integer": ("Num", "Eq", "Ord"),
+    "Float": ("Num",),
+    "Num": ("PartialEq", "PartialOrd", "Display", "Unrestricted"),
+    "Eq": ("PartialEq",),
+    "Ord": ("Eq", "PartialOrd"),
+}
 
 
 @dataclass(frozen=True)
 class Builtin:
     name: str
-    forms: tuple[Effect, ...]
+    effect: Effect
     takes: str
 
     @property
     def arguments(self) -> int:
-        return len(self.forms[0].inputs)
+        return len(self.effect.inputs)
 
 
 @dataclass(frozen=True)
@@ -55,30 +65,19 @@ STACK_WORDS: dict[str, StackWord] = {
 
 BUILTINS: dict[str, Builtin] = {}
 
+T = Type("T")
 
-def define(name: str, forms: list[Effect], takes: str) -> None:
+
+def define(
+    name: str,
+    inputs: tuple[Type, ...],
+    outputs: tuple[Type, ...],
+    takes: str,
+    constraint: str | None = None,
+) -> None:
     assert name not in BUILTINS and name not in STACK_WORDS, name
-    BUILTINS[name] = Builtin(name, tuple(forms), takes)
-
-
-def binary(types: tuple[Type, ...]) -> list[Effect]:
-    return [Effect((t, t), (t,)) for t in types]
-
-
-def binary_checked(types: tuple[Type, ...]) -> list[Effect]:
-    return [Effect((t, t), (option_of(t),)) for t in types]
-
-
-def unary(types: tuple[Type, ...]) -> list[Effect]:
-    return [Effect((t,), (t,)) for t in types]
-
-
-def unary_checked(types: tuple[Type, ...]) -> list[Effect]:
-    return [Effect((t,), (option_of(t),)) for t in types]
-
-
-def compare(types: tuple[Type, ...]) -> list[Effect]:
-    return [Effect((t, t), (BOOL,)) for t in types]
+    where = () if constraint is None else (("T", constraint),)
+    BUILTINS[name] = Builtin(name, Effect(inputs, outputs, where), takes)
 
 
 SAME_NUMBERS = "two numbers of the same type"
@@ -86,56 +85,49 @@ SAME_INTEGERS = "two integers of the same type"
 SAME_FLOATS = "two floats of the same type"
 
 for name in ("+", "-", "*", "/"):
-    define(name, binary(NUMBER_TYPES), SAME_NUMBERS)
-    define(f"{name}.wrap", binary(INTEGER_TYPES), SAME_INTEGERS)
-    define(f"{name}.sat", binary(INTEGER_TYPES), SAME_INTEGERS)
-    define(f"{name}.ieee", binary(FLOAT_TYPES), SAME_FLOATS)
-    define(f"{name}.checked", binary_checked(NUMBER_TYPES), SAME_NUMBERS)
+    define(name, (T, T), (T,), SAME_NUMBERS, "Num")
+    define(f"{name}.wrap", (T, T), (T,), SAME_INTEGERS, "Integer")
+    define(f"{name}.sat", (T, T), (T,), SAME_INTEGERS, "Integer")
+    define(f"{name}.ieee", (T, T), (T,), SAME_FLOATS, "Float")
+    define(f"{name}.checked", (T, T), (option_of(T),), SAME_NUMBERS, "Num")
 
-define("%", binary(INTEGER_TYPES), SAME_INTEGERS)
-define("%.wrap", binary(INTEGER_TYPES), SAME_INTEGERS)
-define("%.sat", binary(INTEGER_TYPES), SAME_INTEGERS)
-define("%.checked", binary_checked(INTEGER_TYPES), SAME_INTEGERS)
+define("%", (T, T), (T,), SAME_INTEGERS, "Integer")
+define("%.wrap", (T, T), (T,), SAME_INTEGERS, "Integer")
+define("%.sat", (T, T), (T,), SAME_INTEGERS, "Integer")
+define("%.checked", (T, T), (option_of(T),), SAME_INTEGERS, "Integer")
 
-SIGNED_NUMBERS = SIGNED_INTEGER_TYPES + FLOAT_TYPES
 for name in ("neg", "abs"):
-    define(name, unary(SIGNED_NUMBERS), "a signed integer or a float")
-    define(f"{name}.wrap", unary(SIGNED_INTEGER_TYPES), "a signed integer")
-    define(f"{name}.sat", unary(SIGNED_INTEGER_TYPES), "a signed integer")
-    define(f"{name}.checked", unary_checked(SIGNED_INTEGER_TYPES), "a signed integer")
+    define(name, (T,), (T,), "a signed integer or a float", "Signed|Float")
+    define(f"{name}.wrap", (T,), (T,), "a signed integer", "Signed")
+    define(f"{name}.sat", (T,), (T,), "a signed integer", "Signed")
+    define(f"{name}.checked", (T,), (option_of(T),), "a signed integer", "Signed")
 
-define("sqrt", unary(FLOAT_TYPES), "a float")
-define("sqrt.ieee", unary(FLOAT_TYPES), "a float")
-define("sqrt.checked", unary_checked(FLOAT_TYPES), "a float")
+define("sqrt", (T,), (T,), "a float", "Float")
+define("sqrt.ieee", (T,), (T,), "a float", "Float")
+define("sqrt.checked", (T,), (option_of(T),), "a float", "Float")
 
 for name in ("bit-and", "bit-or", "bit-xor"):
-    define(name, binary(INTEGER_TYPES), SAME_INTEGERS)
-define("bit-not", unary(INTEGER_TYPES), "an integer")
+    define(name, (T, T), (T,), SAME_INTEGERS, "Integer")
+define("bit-not", (T,), (T,), "an integer", "Integer")
 
-SHIFT = [Effect((t, U32), (t,)) for t in INTEGER_TYPES]
-SHIFT_CHECKED = [Effect((t, U32), (option_of(t),)) for t in INTEGER_TYPES]
 SHIFT_TAKES = "an integer and a `u32` amount"
 for name in ("shl", "shr"):
-    define(name, SHIFT, SHIFT_TAKES)
-    define(f"{name}.wrap", SHIFT, SHIFT_TAKES)
-    define(f"{name}.checked", SHIFT_CHECKED, SHIFT_TAKES)
+    define(name, (T, U32), (T,), SHIFT_TAKES, "Integer")
+    define(f"{name}.wrap", (T, U32), (T,), SHIFT_TAKES, "Integer")
+    define(f"{name}.checked", (T, U32), (option_of(T),), SHIFT_TAKES, "Integer")
 for name in ("rotl", "rotr"):
-    define(name, SHIFT, SHIFT_TAKES)
+    define(name, (T, U32), (T,), SHIFT_TAKES, "Integer")
 for name in ("count-ones", "leading-zeros", "trailing-zeros"):
-    define(name, [Effect((t,), (U32,)) for t in INTEGER_TYPES], "an integer")
+    define(name, (T,), (U32,), "an integer", "Integer")
 
-EQUALITY_TYPES = NUMBER_TYPES + (BOOL, CHAR, STR)
-ORDERED_TYPES = NUMBER_TYPES + (BOOL, CHAR)
 for name in ("==", "!="):
-    define(name, compare(EQUALITY_TYPES), "two values of the same type")
+    define(name, (T, T), (BOOL,), "two values of the same type", "PartialEq")
 for name in ("<", "<=", ">", ">="):
-    define(name, compare(ORDERED_TYPES), "two ordered values of the same type")
+    define(name, (T, T), (BOOL,), "two ordered values of the same type", "PartialOrd")
 
 for name in ("and", "or", "xor"):
-    define(name, [Effect((BOOL, BOOL), (BOOL,))], "two `bool` values")
-define("not", [Effect((BOOL,), (BOOL,))], "a `bool`")
+    define(name, (BOOL, BOOL), (BOOL,), "two `bool` values")
+define("not", (BOOL,), (BOOL,), "a `bool`")
 
-DISPLAY_TYPES = NUMBER_TYPES + (BOOL, CHAR, STR)
-define(
-    "print", [Effect((t,), ()) for t in DISPLAY_TYPES], "a value that can be displayed"
-)
+define("print", (T,), (), "a value that can be displayed", "Display")
+define("unit", (), (UNIT,), "nothing")

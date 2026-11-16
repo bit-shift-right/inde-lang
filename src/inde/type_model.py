@@ -12,6 +12,8 @@ class Type:
     args: tuple[Type, ...] = ()
 
     def __str__(self) -> str:
+        if is_unknown(self):
+            return "_"
         if not self.args:
             return self.name
         return f"{self.name}[{', '.join(str(arg) for arg in self.args)}]"
@@ -21,10 +23,26 @@ class Type:
 class Effect:
     inputs: tuple[Type, ...] = ()
     outputs: tuple[Type, ...] = ()
+    where: tuple[tuple[str, str], ...] = ()
 
     def __str__(self) -> str:
         parts = [str(t) for t in self.inputs] + ["->"] + [str(t) for t in self.outputs]
-        return f"( {' '.join(parts)} )"
+        text = f"( {' '.join(parts)} )"
+        if not self.where:
+            return text
+        by_variable: dict[str, list[str]] = {}
+        for variable, constraint in self.where:
+            by_variable.setdefault(variable, []).append(constraint)
+        clauses = [f"{v}: {' & '.join(cs)}" for v, cs in by_variable.items()]
+        return f"{text} where {', '.join(clauses)}"
+
+    def variables(self) -> tuple[str, ...]:
+        found: list[str] = []
+        for part in self.inputs + self.outputs:
+            for name in variables_of(part):
+                if name not in found:
+                    found.append(name)
+        return tuple(found)
 
 
 I8, I16, I32, I64 = Type("i8"), Type("i16"), Type("i32"), Type("i64")
@@ -57,6 +75,37 @@ def result_of(value: Type, error: Type) -> Type:
 
 def from_number_type(number_type: NumberType) -> Type:
     return Type(number_type.value)
+
+
+def is_unknown(checked_type: Type) -> bool:
+    return checked_type.name.startswith("?")
+
+
+def is_type_variable(checked_type: Type) -> bool:
+    name = checked_type.name
+    return name[0].isupper() and (len(name) == 1 or name[1:].isdigit())
+
+
+def variables_of(checked_type: Type) -> list[str]:
+    if is_type_variable(checked_type):
+        return [checked_type.name]
+    found: list[str] = []
+    for arg in checked_type.args:
+        for name in variables_of(arg):
+            if name not in found:
+                found.append(name)
+    return found
+
+
+def substitute(checked_type: Type, replacements: dict[str, Type]) -> Type:
+    if checked_type.name in replacements:
+        return replacements[checked_type.name]
+    if not checked_type.args:
+        return checked_type
+    return Type(
+        checked_type.name,
+        tuple(substitute(arg, replacements) for arg in checked_type.args),
+    )
 
 
 def format_types(types: Sequence[Type]) -> str:

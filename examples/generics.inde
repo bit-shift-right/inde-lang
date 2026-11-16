@@ -1,0 +1,46 @@
+type List[T] = nil | cons( T List[T] )
+
+word square ( T -> T ) where T: Num
+  dup *
+end
+
+word or-else ( Option[T] T -> T ) where T: Unrestricted
+  swap match
+    case none
+    case some swap drop
+  end
+end
+
+word length ( List[T] -> i32 ) where T: Unrestricted
+  match
+    case nil 0
+    case cons length swap drop 1 +
+  end
+end
+
+word safe-div ( i32 i32 -> Result[i32, str] )
+  dup 0 == if
+    drop drop "division by zero" err
+  else
+    / ok
+  end
+end
+
+word show ( Result[i32, str] -> )
+  match
+    case ok print
+    case err print
+  end
+end
+
+word main ( -> Result[unit, str] )
+  3 square print
+  1.5 square print
+  5 some 0 or-else print
+  none "nothing there" or-else print
+  "a" "b" "c" nil cons cons cons length print
+  7 2 safe-div show
+  1 0 safe-div show
+  1 2 pair pair-unpack + print
+  unit ok
+end
