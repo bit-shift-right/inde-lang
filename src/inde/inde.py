@@ -1,10 +1,10 @@
 import sys
 from pathlib import Path
 
-from inde import ast, logger, parser
+from inde import checker, logger, parser
 from inde.errors import IndeErrors
 
-DEFAULT_SOURCE = "./examples/parser_demo_test.inde"
+DEFAULT_SOURCE = "./examples/checker_demo.inde"
 
 
 def main() -> int:
@@ -18,11 +18,13 @@ def main() -> int:
 
     try:
         parsed_program = parser.parse(source)
+        checked_program = checker.check(parsed_program, require_main=True)
     except IndeErrors as failure:
         logger.report_errors(source_name, failure.errors)
         return 1
 
-    print(ast.dump(parsed_program))
+    for word in checked_program.words.values():
+        print(f"{word.name} {word.effect}")
     return 0
 
 

@@ -1,0 +1,21 @@
+type Shape = circle( f32 ) | rect( f32 f32 )
+
+const PI = 3.14159
+
+word square ( f32 -> f32 )
+  dup *
+end
+
+word circle-area ( f32 -> f32 )
+  square PI *
+end
+
+word unit-circle ( -> Shape )
+  1.0 circle
+end
+
+word main ( -> )
+  2.0 circle-area print
+  1 2 + 3 * print
+  "done" print
+end

@@ -1,0 +1,8 @@
+word square ( i32 -> i32 )
+  dup +.checked
+end
+
+word main ( -> )
+  1 2.0 + print
+  3 sqaure print
+end
