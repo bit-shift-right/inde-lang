@@ -104,6 +104,7 @@ class Checker:
         self.words: dict[str, WordInfo] = {}
         self.linear_types: set[str] = set()
         self.field_types: dict[str, list[Type]] = {}
+        self.generic_fields: dict[str, list[TypeExpression]] = {}
         self.deferred: dict[str, str] = {
             name: "the core library constructors need generics"
             for name in LIBRARY_CONSTRUCTORS
@@ -150,6 +151,9 @@ class Checker:
 
         self.derive_linear_types()
 
+        for word in list(self.words.values()):
+            with self.recover():
+                self.check_array_elements(word)
         for word in list(self.words.values()):
             with self.recover():
                 self.check_word(word)
@@ -210,11 +214,22 @@ class Checker:
         if self.types[declaration.name].location != declaration.location:
             return
         if declaration.params:
+            generic_fields: list[TypeExpression] = []
             for variant in declaration.variants:
-                self.claim_name(variant.name, variant.location)
+                try:
+                    self.claim_name(variant.name, variant.location)
+                    for field in variant.fields:
+                        self.check_type_names(field, declaration)
+                except IndeError:
+                    for unfinished in declaration.variants:
+                        if unfinished.name not in self.deferred:
+                            self.broken.add(unfinished.name)
+                    raise
+                generic_fields.extend(variant.fields)
                 self.deferred[variant.name] = (
                     f"the constructors of `{declaration.name}` need generics"
                 )
+            self.generic_fields[declaration.name] = generic_fields
             return
 
         result = Type(declaration.name)
@@ -268,6 +283,26 @@ class Checker:
             self.fail(f"unknown type `{name}`", expression.location)
         return Type(name, tuple(self.resolve_type(arg) for arg in expression.args))
 
+    def check_type_names(
+        self, expression: TypeExpression, declaration: TypeDeclaration
+    ) -> None:
+        if isinstance(expression, TypeVariable):
+            if expression.name not in declaration.params:
+                self.fail(
+                    f"`{expression.name}` is not a parameter of `{declaration.name}`",
+                    expression.location,
+                )
+        elif isinstance(expression, QuotationType):
+            for side in (expression.effect.inputs, expression.effect.outputs):
+                for part in side.types:
+                    self.check_type_names(part, declaration)
+        else:
+            name = expression.name
+            if name not in CORE_TYPE_ARGUMENTS and name not in self.types:
+                self.fail(f"unknown type `{name}`", expression.location)
+            for arg in expression.args:
+                self.check_type_names(arg, declaration)
+
     def derive_linear_types(self) -> None:
         changed = True
         while changed:
@@ -278,6 +313,37 @@ class Checker:
                 ):
                     self.linear_types.add(name)
                     changed = True
+            for name, expressions in self.generic_fields.items():
+                if name not in self.linear_types and any(
+                    self.syntax_is_linear(expression) for expression in expressions
+                ):
+                    self.linear_types.add(name)
+                    changed = True
+
+    def syntax_is_linear(self, expression: TypeExpression) -> bool:
+        if isinstance(expression, TypeVariable):
+            return False
+        if isinstance(expression, QuotationType):
+            return expression.linear
+        return (
+            expression.name in CORE_LINEAR_TYPES
+            or expression.name in self.linear_types
+            or any(self.syntax_is_linear(arg) for arg in expression.args)
+        )
+
+    def check_array_elements(self, word: WordInfo) -> None:
+        for checked_type in word.effect.inputs + word.effect.outputs:
+            self.require_unrestricted_elements(checked_type, word)
+
+    def require_unrestricted_elements(self, checked_type: Type, word: WordInfo) -> None:
+        if checked_type.name == "array" and self.is_linear(checked_type.args[0]):
+            self.fail(
+                f"the elements of an `array` must be unrestricted, but "
+                f"`{checked_type.args[0]}` is linear (in `{word.name}`)",
+                word.location,
+            )
+        for arg in checked_type.args:
+            self.require_unrestricted_elements(arg, word)
 
     def is_linear(self, checked_type: Type) -> bool:
         return (

@@ -14,7 +14,7 @@ authors = [ { name = "Dillon Shephard" }, ]
 keywords = [ "inde", "inde-lang", "cli", "lexer", "parser", "interpreter", "compiler", ]
 
 [project.scripts]
-inde = "inde.inde:main"
+inde = "inde.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inde"]

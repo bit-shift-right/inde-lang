@@ -373,15 +373,19 @@ def test_constants() -> None:
         (
             "const NEWLINE = '\\n'  word t ( -> ) { NEWLINE 1 } drop end",
             [
-                "the elements of an array literal must have one type; "
-                "found `char` and `i32`"
+                (
+                    "the elements of an array literal must have one type; "
+                    "found `char` and `i32`"
+                )
             ],
         ),
         (
             "const MIXED = { 1 2u8 }  word t ( -> ) MIXED drop end",
             [
-                "the elements of an array literal must have one type; "
-                "found `i32` and `u8`"
+                (
+                    "the elements of an array literal must have one type; "
+                    "found `i32` and `u8`"
+                )
             ],
         ),
     ],
@@ -549,3 +553,71 @@ def test_invalid_main(source: str, fragment: str) -> None:
 def test_main_is_only_required_on_request() -> None:
     check(parse("word helper ( -> ) end"))
     assert "`main` must have" in get_failure_message("word main ( i32 -> ) drop end")
+
+
+def test_types_with_parameters_can_be_linear() -> None:
+    source = (
+        "linear type Handle = handle( u32 )\n"
+        "type Holder[T] = holder( strbuf T )\n"
+        "type Wrap[T] = wrap( Handle T )\n"
+        "type Nested[T] = nested( Wrap[T] )\n"
+        "type Once[T] = once( linear [ T -> T ] )\n"
+        "type Tagged[T] = tagged( str T )\n"
+    )
+    assert check(parse(source)).linear_types == {
+        "Handle",
+        "Holder",
+        "Wrap",
+        "Nested",
+        "Once",
+    }
+    for name in ("Holder", "Wrap", "Nested", "Once"):
+        message = get_failure_message(source + f"word t ( {name}[i32] -> ) drop end")
+        assert f"cannot discard a value of the linear type `{name}[i32]`" in message
+    check(parse(source + "word t ( Tagged[i32] -> ) drop end"))
+    assert "linear type `Tagged[strbuf]`" in get_failure_message(
+        source + "word t ( Tagged[strbuf] -> ) drop end"
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "messages"),
+    [
+        ("type Box[T] = box( Missing T )", ["unknown type `Missing`"]),
+        ("type Box[T] = box( array[Missing] T )", ["unknown type `Missing`"]),
+        ("type Box[T] = box( T U )", ["`U` is not a parameter of `Box`"]),
+        ("type Box[T] = box( [ T -> U ] )", ["`U` is not a parameter of `Box`"]),
+        (
+            "type Box[T] = full( Missing T ) | empty\nword t ( -> ) empty full end",
+            ["unknown type `Missing`"],
+        ),
+    ],
+)
+def test_fields_of_types_with_parameters_are_checked(
+    source: str, messages: list[str]
+) -> None:
+    assert get_failure_messages(source) == messages
+
+
+@pytest.mark.parametrize(
+    ("source", "fragment"),
+    [
+        ("word t ( array[strbuf] -> array[strbuf] ) end", "but `strbuf` is linear"),
+        ("word t ( -> Option[array[arraybuf[u8]]] ) t end", "`arraybuf[u8]` is linear"),
+        (
+            "linear type Handle = handle( u32 )\nword t ( array[Handle] -> ) t end",
+            "the elements of an `array` must be unrestricted, but `Handle` is linear",
+        ),
+        (
+            "linear type Handle = handle( u32 )\ntype Bag = bag( array[Handle] )",
+            "but `Handle` is linear (in `bag`)",
+        ),
+    ],
+)
+def test_array_elements_must_be_unrestricted(source: str, fragment: str) -> None:
+    assert fragment in get_failure_message(source)
+
+
+def test_arrays_of_unrestricted_elements() -> None:
+    check(parse("type Label = label( str )\nword t ( array[Label] -> ) drop end"))
+    check(parse("word t ( arraybuf[strbuf] -> arraybuf[strbuf] ) end"))
