@@ -1,0 +1,38 @@
+word judge ( str i32 -> str )
+  let name value in
+    strbuf-new name strbuf-append " is " strbuf-append
+    value 0 < if "negative" else "positive" end
+    let verdict in
+      verdict strbuf-append
+    end
+    strbuf-freeze
+  end
+end
+
+word describe ( Option[i32] strbuf -> str )
+  let found buffer in
+    found match
+      case some drop buffer "something" strbuf-append strbuf-freeze
+      case none buffer "nothing" strbuf-append strbuf-freeze
+    end
+  end
+end
+
+word repeat ( str i32 -> str )
+  strbuf-new rot rot
+  while dup 0 > do
+    1 - let buffer text count in
+      buffer text strbuf-append text count
+    end
+  end
+  drop drop strbuf-freeze
+end
+
+word main ( -> )
+  "x" 5 judge print
+  "y" -1 judge print
+  3 some strbuf-new describe print
+  none strbuf-new describe print
+  "ab" 3 repeat print
+  "héllo" strbuf-from-str strbuf-len print strbuf-freeze print
+end

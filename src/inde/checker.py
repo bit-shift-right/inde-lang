@@ -6,6 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from typing import NoReturn
 
+from inde import ast
 from inde.ast import (
     ArrayLiteral,
     Body,
@@ -50,18 +51,27 @@ from inde.type_model import (
     CHAR,
     CORE_LINEAR_TYPES,
     FLOAT_TYPES,
+    IMPLICIT_ROW,
     INTEGER_TYPES,
+    LINEAR,
     NUMBER_TYPES,
     SIGNED_INTEGER_TYPES,
     STR,
     UNIT,
+    UNRESTRICTED,
     Effect,
+    Stack,
     Type,
     array_of,
     format_types,
     from_number_type,
+    is_quotation,
     is_type_variable,
     is_unknown,
+    is_unknown_row,
+    quotation_constraints,
+    quotation_of,
+    rows_of,
     substitute,
     variables_of,
 )
@@ -100,6 +110,14 @@ class Obligation:
 
 
 @dataclass(frozen=True)
+class Capture:
+    name: str
+    operands: tuple[Type, ...]
+    qualifier: Type
+    location: Location | None
+
+
+@dataclass(frozen=True)
 class CheckedProgram:
     types: dict[str, TypeInfo]
     constants: dict[str, ConstantInfo]
@@ -107,7 +125,35 @@ class CheckedProgram:
     linear_types: frozenset[str]
 
 
-Scope = dict[str, Type]
+@dataclass
+class Local:
+    name: str
+    type: Type
+    location: Location | None
+    loop_depth: int
+    uses: int = 0
+    second_use: Location | None = None
+    in_loop: Location | None = None
+    disagreement: tuple[str, str, Location | None] | None = None
+
+
+Scope = dict[str, Local]
+
+
+class TypeStack:
+    def __init__(self, row: str, types: Iterable[Type] = ()) -> None:
+        self.row = row
+        self.types = list(types)
+
+    def copy(self) -> TypeStack:
+        return TypeStack(self.row, self.types)
+
+    def whole(self) -> Stack:
+        return Stack(self.row, tuple(self.types))
+
+    def become(self, other: TypeStack | Stack) -> None:
+        self.row = other.row
+        self.types = list(other.types)
 
 
 class _Abandon(Exception):
@@ -138,6 +184,13 @@ class Checker:
         self.inference = Inference()
         self.assumptions: dict[str, frozenset[str]] = {}
         self.obligations: list[Obligation] = []
+        self.captures: list[Capture] = []
+        self.locals: list[Local] = []
+        self.loop_depth = 0
+        self.bound_syntax: dict[str, QuotationType] = {}
+        self.quotation_bounds: dict[str, Effect] = {}
+        self.resolving_bounds: set[str] = set()
+        self.hidden_locals: frozenset[str] = frozenset()
         self.declare_library()
 
     def declare_library(self) -> None:
@@ -317,14 +370,44 @@ class Checker:
 
     def resolve_signature(self, declaration: WordDeclaration) -> Effect:
         signature = declaration.signature
-        if signature.inputs.row != signature.outputs.row:
-            self.unsupported(
-                "signatures with two different row variables", signature.location
+        rows = None
+        if signature.inputs.row is not None and signature.outputs.row is not None:
+            rows = (f"..{signature.inputs.row}", f"..{signature.outputs.row}")
+
+        syntax: dict[str, QuotationType] = {}
+        for constraint in declaration.where:
+            for bound in constraint.bounds:
+                if not isinstance(bound, QuotationType):
+                    continue
+                if bound.linear:
+                    self.fail(
+                        "a quotation constraint accepts either qualifier, "
+                        "so it is written without `linear`",
+                        bound.location,
+                    )
+                if constraint.var in syntax:
+                    self.fail(
+                        f"`{constraint.var}` has two quotation constraints",
+                        bound.location,
+                    )
+                syntax[constraint.var] = bound
+        self.bound_syntax = syntax
+        try:
+            for variable, bound in syntax.items():
+                self.quotation_bound(variable, bound.location)
+            effect = Effect(
+                tuple(self.resolve_type(t) for t in signature.inputs.types),
+                tuple(self.resolve_type(t) for t in signature.outputs.types),
+                rows=rows,
             )
-        effect = Effect(
-            tuple(self.resolve_type(t) for t in signature.inputs.types),
-            tuple(self.resolve_type(t) for t in signature.outputs.types),
-        )
+        finally:
+            self.bound_syntax = {}
+            self.quotation_bounds = {}
+        if rows is not None and rows[0] == rows[1]:
+            inner = [row for t in effect.inputs + effect.outputs for row in rows_of(t)]
+            if rows[0] not in inner:
+                effect = replace(effect, rows=None)
+
         variables = effect.variables()
         where: list[tuple[str, str]] = []
         for constraint in declaration.where:
@@ -336,7 +419,7 @@ class Checker:
                 )
             for bound in constraint.bounds:
                 if isinstance(bound, QuotationType):
-                    self.unsupported("quotation constraints", bound.location)
+                    continue
                 if bound.name not in CONSTRAINTS:
                     self.fail(
                         f"unknown constraint `{bound.name}`"
@@ -349,13 +432,44 @@ class Checker:
 
     def resolve_type(self, expression: TypeExpression) -> Type:
         if isinstance(expression, TypeVariable):
-            return Type(expression.name)
+            name = expression.name
+            if name in self.bound_syntax:
+                bound = self.quotation_bound(name, expression.location)
+                return quotation_of(bound, Type(name))
+            return Type(name)
         if isinstance(expression, QuotationType):
-            self.unsupported("quotation types", expression.location)
+            qualifier = LINEAR if expression.linear else UNRESTRICTED
+            return quotation_of(self.resolve_effect(expression.effect), qualifier)
         name = expression.name
         if name not in CORE_TYPE_ARGUMENTS and name not in self.types:
             self.fail(f"unknown type `{name}`", expression.location)
         return Type(name, tuple(self.resolve_type(arg) for arg in expression.args))
+
+    def quotation_bound(self, variable: str, location: Location | None) -> Effect:
+        if variable not in self.quotation_bounds:
+            if variable in self.resolving_bounds:
+                self.fail(
+                    f"the quotation constraint on `{variable}` refers back "
+                    f"to `{variable}`",
+                    location,
+                )
+            self.resolving_bounds.add(variable)
+            try:
+                effect = self.resolve_effect(self.bound_syntax[variable].effect)
+            finally:
+                self.resolving_bounds.discard(variable)
+            self.quotation_bounds[variable] = effect
+        return self.quotation_bounds[variable]
+
+    def resolve_effect(self, effect: ast.StackEffect) -> Effect:
+        rows = None
+        if effect.inputs.row is not None and effect.outputs.row is not None:
+            rows = (f"..{effect.inputs.row}", f"..{effect.outputs.row}")
+        return Effect(
+            tuple(self.resolve_type(t) for t in effect.inputs.types),
+            tuple(self.resolve_type(t) for t in effect.outputs.types),
+            rows=rows,
+        )
 
     def check_type_names(
         self, expression: TypeExpression, declaration: TypeDeclaration
@@ -367,6 +481,11 @@ class Checker:
                     expression.location,
                 )
         elif isinstance(expression, QuotationType):
+            if expression.effect.inputs.row is not None:
+                self.fail(
+                    "a quotation type in a type declaration cannot name its rows",
+                    expression.location,
+                )
             for side in (expression.effect.inputs, expression.effect.outputs):
                 for part in side.types:
                     self.check_type_names(part, declaration)
@@ -391,6 +510,8 @@ class Checker:
     def always_linear(self, checked_type: Type) -> bool:
         if is_type_variable(checked_type):
             return False
+        if checked_type == LINEAR:
+            return True
         return (
             checked_type.name in CORE_LINEAR_TYPES
             or checked_type.name in self.linear_types
@@ -474,6 +595,8 @@ class Checker:
     def is_linear(self, checked_type: Type) -> bool:
         if is_type_variable(checked_type):
             return "Unrestricted" not in self.assumptions.get(checked_type.name, ())
+        if checked_type == LINEAR:
+            return True
         return (
             checked_type.name in CORE_LINEAR_TYPES
             or checked_type.name in self.linear_types
@@ -556,9 +679,17 @@ class Checker:
             message += f"; add `where {resolved}: {constraint}` to the signature"
         return message
 
+    def qualifier_variable(self, resolved: Type) -> Type | None:
+        if is_quotation(resolved) and is_type_variable(resolved.args[0]):
+            return resolved.args[0]
+        return None
+
     def begin(self, where: tuple[tuple[str, str], ...] = ()) -> None:
         self.inference = Inference()
         self.obligations = []
+        self.captures = []
+        self.locals = []
+        self.loop_depth = 0
         assumed: dict[str, set[str]] = {}
         for variable, constraint in where:
             pending = [constraint]
@@ -570,6 +701,7 @@ class Checker:
         self.assumptions = {v: frozenset(cs) for v, cs in assumed.items()}
 
     def finish(self) -> None:
+        self.settle_captures()
         obligations, self.obligations = self.obligations, []
         for obligation in obligations:
             resolved = self.inference.resolve(obligation.type)
@@ -580,6 +712,7 @@ class Checker:
                     self.unmet(resolved, obligation.constraint, obligation.describe),
                     obligation.location,
                 )
+        self.check_locals()
         for name, origin in self.inference.origins.items():
             if self.inference.has_unknowns(Type(name)):
                 self.fail(
@@ -591,41 +724,53 @@ class Checker:
     def show(self, types: Iterable[Type]) -> str:
         return format_types(self.inference.resolve_all(list(types)))
 
+    def show_stack(self, stack: Stack) -> str:
+        flat = self.inference.flatten(stack)
+        if flat.row == IMPLICIT_ROW or is_unknown_row(flat.row):
+            return format_types(flat.types)
+        return f"`{' '.join([flat.row, *(str(t) for t in flat.types)])}`"
+
+    def settle(self, stack: TypeStack) -> None:
+        stack.become(self.inference.flatten(stack.whole()))
+
     def check_line(self, body: Body, stack: list[Type]) -> list[Type]:
         self.begin()
-        self.check_body(body, stack)
+        working = TypeStack(IMPLICIT_ROW, stack)
+        self.check_body(body, working)
         self.finish()
-        stack[:] = self.inference.resolve_all(stack)
+        self.settle(working)
+        stack[:] = working.types
         return stack
 
     def check_word(self, word: WordInfo) -> None:
         if word.declaration is None:
             return
         self.begin(word.effect.where)
-        stack = list(word.effect.inputs)
+        input_row, output_row = word.effect.rows or (IMPLICIT_ROW, IMPLICIT_ROW)
+        stack = TypeStack(input_row, word.effect.inputs)
         self.current_word = word.name
         try:
             self.check_body(word.declaration.body, stack)
         finally:
             self.current_word = None
-        if not self.inference.unify_all(stack, word.effect.outputs):
+        declared = Stack(output_row, word.effect.outputs)
+        if not self.inference.unify_stacks(stack.whole(), declared):
             self.fail(
-                f"`{word.name}` declares that it leaves "
-                f"{format_types(word.effect.outputs)}, "
-                f"but its body leaves {self.show(stack)}",
+                f"`{word.name}` declares that it leaves {self.show_stack(declared)}, "
+                f"but its body leaves {self.show_stack(stack.whole())}",
                 word.location,
             )
         self.finish()
 
     def check_body(
-        self, body: Body, stack: list[Type], scope: Scope | None = None
-    ) -> list[Type]:
+        self, body: Body, stack: TypeStack, scope: Scope | None = None
+    ) -> TypeStack:
         scope = scope or {}
         for item in body:
             self.check_item(item, stack, scope)
         return stack
 
-    def check_item(self, item: Item, stack: list[Type], scope: Scope) -> None:
+    def check_item(self, item: Item, stack: TypeStack, scope: Scope) -> None:
         if isinstance(
             item,
             (
@@ -637,16 +782,18 @@ class Checker:
                 ArrayLiteral,
             ),
         ):
-            stack.append(self.literal_type(item))
+            stack.types.append(self.literal_type(item))
         elif isinstance(item, ConstantReference):
-            stack.append(self.constant_type(item))
+            stack.types.append(self.constant_type(item))
         elif isinstance(item, WordReference):
             if item.name in scope:
-                stack.append(scope[item.name])
+                local = scope[item.name]
+                self.use_local(local, item.location)
+                stack.types.append(local.type)
             else:
                 self.check_call(item, stack, scope)
         elif isinstance(item, Quotation):
-            self.unsupported("quotations", item.location)
+            self.check_quotation(item, stack, scope)
         elif isinstance(item, Propagate):
             self.unsupported("`?` forms", item.location)
         elif isinstance(item, If):
@@ -659,8 +806,10 @@ class Checker:
             assert isinstance(item, Let), f"unhandled item {type(item).__name__}"
             self.check_let(item, stack, scope)
 
-    def describe_stacks(self, *stacks: list[Type]) -> list[str]:
-        resolved = [self.inference.resolve_all(stack) for stack in stacks]
+    def describe_stacks(self, *stacks: TypeStack) -> list[str]:
+        resolved = [
+            list(self.inference.flatten(stack.whole()).types) for stack in stacks
+        ]
         depth = 0
         shortest = min(len(stack) for stack in resolved)
         while depth < shortest and all(
@@ -669,21 +818,46 @@ class Checker:
             depth += 1
         return [format_types(stack[depth:]) for stack in resolved]
 
-    def check_if(self, item: If, stack: list[Type], scope: Scope) -> None:
+    def check_quotation(self, item: Quotation, stack: TypeStack, scope: Scope) -> None:
+        row = self.inference.fresh_row()
+        inner = TypeStack(row)
+        hidden = self.hidden_locals
+        self.hidden_locals = hidden | scope.keys()
+        try:
+            self.check_body(item.body, inner, {})
+        finally:
+            self.hidden_locals = hidden
+        effect = Effect(outputs=tuple(inner.types), rows=(row, inner.row))
+        stack.types.append(quotation_of(self.inference.generalize(effect)))
+
+    def check_if(self, item: If, stack: TypeStack, scope: Scope) -> None:
         self.require_depth("if", 1, stack, item.location)
-        condition = stack.pop()
+        condition = stack.types.pop()
         if not self.inference.unify(condition, BOOL):
             self.fail(
                 f"`if` takes a `bool`, found {self.show([condition])}", item.location
             )
 
-        then_stack = list(stack)
+        before = self.uses_of(scope)
+        then_stack = stack.copy()
         self.check_body(item.then_body, then_stack, scope)
-        else_stack = list(stack)
+        then_uses = self.uses_of(scope)
+        self.restore_uses(scope, before)
+        else_stack = stack.copy()
         if item.else_body is not None:
             self.check_body(item.else_body, else_stack, scope)
+            labels = ("before `else`", "after it")
+        else:
+            labels = ("in its body", "when the body is skipped")
+        self.join_branches(
+            "the branches of `if`",
+            scope,
+            before,
+            [(labels[0], then_uses), (labels[1], self.uses_of(scope))],
+            item.location,
+        )
 
-        if not self.inference.unify_all(then_stack, else_stack):
+        if not self.inference.unify_stacks(then_stack.whole(), else_stack.whole()):
             _, first, second = self.describe_stacks(stack, then_stack, else_stack)
             if item.else_body is None:
                 self.fail(
@@ -696,12 +870,20 @@ class Checker:
                 f"{first} before `else`, {second} after it",
                 item.location,
             )
-        stack[:] = then_stack
+        stack.become(then_stack)
 
-    def check_while(self, item: While, stack: list[Type], scope: Scope) -> None:
-        condition_stack = list(stack)
+    def check_while(self, item: While, stack: TypeStack, scope: Scope) -> None:
+        self.loop_depth += 1
+        try:
+            self.check_loop(item, stack, scope)
+        finally:
+            self.loop_depth -= 1
+
+    def check_loop(self, item: While, stack: TypeStack, scope: Scope) -> None:
+        condition_stack = stack.copy()
         self.check_body(item.condition, condition_stack, scope)
-        if not self.inference.unify_all(condition_stack, [*stack, BOOL]):
+        expected = Stack(stack.row, (*stack.types, BOOL))
+        if not self.inference.unify_stacks(condition_stack.whole(), expected):
             before, after = self.describe_stacks(stack, condition_stack)
             self.fail(
                 "the condition of `while` must add one `bool` to the stack, "
@@ -709,9 +891,9 @@ class Checker:
                 item.location,
             )
 
-        body_stack = list(stack)
+        body_stack = stack.copy()
         self.check_body(item.body, body_stack, scope)
-        if not self.inference.unify_all(body_stack, stack):
+        if not self.inference.unify_stacks(body_stack.whole(), stack.whole()):
             before, after = self.describe_stacks(stack, body_stack)
             self.fail(
                 "the body of `while` must leave the stack as it found it, "
@@ -727,11 +909,11 @@ class Checker:
             or name in self.broken
         )
 
-    def check_let(self, item: Let, stack: list[Type], scope: Scope) -> None:
+    def check_let(self, item: Let, stack: TypeStack, scope: Scope) -> None:
         count = len(item.names)
         self.require_depth("let", count, stack, item.location)
-        bound = stack[len(stack) - count :]
-        del stack[len(stack) - count :]
+        bound = stack.types[len(stack.types) - count :]
+        del stack.types[len(stack.types) - count :]
 
         inner = dict(scope)
         for name, bound_type in zip(item.names, bound, strict=True):
@@ -747,14 +929,96 @@ class Checker:
                 )
             if self.current_word is not None:
                 self.local_names.setdefault(name, self.current_word)
-            self.require(
-                bound_type,
-                "Unrestricted",
-                item.location,
-                lambda _: "linear locals are not supported by the checker yet",
-            )
-            inner[name] = bound_type
+            inner[name] = Local(name, bound_type, item.location, self.loop_depth)
         self.check_body(item.body, stack, inner)
+        for name in item.names:
+            if not self.judge_local(inner[name]):
+                self.locals.append(inner[name])
+
+    def use_local(self, local: Local, location: Location | None) -> None:
+        local.uses += 1
+        if local.uses == 2 and local.second_use is None:
+            local.second_use = location
+        if self.loop_depth > local.loop_depth and local.in_loop is None:
+            local.in_loop = location
+
+    def uses_of(self, scope: Scope) -> dict[str, int]:
+        return {name: local.uses for name, local in scope.items()}
+
+    def restore_uses(self, scope: Scope, uses: dict[str, int]) -> None:
+        for name, count in uses.items():
+            scope[name].uses = count
+
+    def join_branches(
+        self,
+        construct: str,
+        scope: Scope,
+        before: dict[str, int],
+        ends: list[tuple[str, dict[str, int]]],
+        location: Location | None,
+    ) -> None:
+        for name, local in scope.items():
+            counts = [uses[name] - before[name] for _, uses in ends]
+            if len(set(counts)) > 1 and local.disagreement is None:
+                detail = ", ".join(
+                    f"{times(count)} {label}"
+                    for (label, _), count in zip(ends, counts, strict=True)
+                )
+                local.disagreement = (construct, detail, location)
+            local.uses = max(uses[name] for _, uses in ends)
+
+    def check_locals(self) -> None:
+        for local in self.locals:
+            self.judge_local(local)
+
+    def judge_local(self, local: Local) -> bool:
+        resolved = self.inference.resolve(local.type)
+        if self.inference.has_unknowns(resolved):
+            return False
+        if not self.is_linear(resolved):
+            return True
+        variable = (
+            None if self.always_linear(resolved) else self.linear_variable(resolved)
+        )
+        subject = (
+            f"the linear local `{local.name}`"
+            if variable is None
+            else f"the local `{local.name}`"
+        )
+        location: Location | None
+        if local.in_loop is not None:
+            message = f"{subject} is used inside a loop, which may run more than once"
+            if variable is None:
+                message += "; pass the value through the loop on the stack instead"
+            location = local.in_loop
+        elif local.second_use is not None:
+            message = f"{subject} is used {times(local.uses)}"
+            location = local.second_use
+        elif local.disagreement is not None:
+            construct, detail, location = local.disagreement
+            message = f"{construct} use {subject} differently: {detail}"
+        elif local.uses == 0:
+            message = f"{subject} is never used"
+            location = local.location
+        else:
+            return True
+        if variable is not None:
+            message += (
+                f"; `{local.name}` has type `{resolved}`, which may be linear; "
+                f"add `where {variable}: Unrestricted` to the signature"
+            )
+        self.fail(message, location)
+
+    def linear_variable(self, checked_type: Type) -> str | None:
+        if is_type_variable(checked_type):
+            if "Unrestricted" in self.assumptions.get(checked_type.name, ()):
+                return None
+            return checked_type.name
+        for arg in checked_type.args:
+            variable = self.linear_variable(arg)
+            if variable is not None:
+                return variable
+        return None
 
     def describe_pattern(self, pattern: Pattern) -> str:
         if isinstance(pattern, ConstructorPattern):
@@ -771,9 +1035,9 @@ class Checker:
         assert isinstance(literal, (IntegerLiteral, FloatLiteral))
         return str(literal.value)
 
-    def check_match(self, item: Match, stack: list[Type], scope: Scope) -> None:
+    def check_match(self, item: Match, stack: TypeStack, scope: Scope) -> None:
         self.require_depth("match", 1, stack, item.location)
-        scrutinee = self.inference.resolve(stack.pop())
+        scrutinee = self.inference.resolve(stack.types.pop())
 
         if is_unknown(scrutinee):
             self.fail(
@@ -796,27 +1060,34 @@ class Checker:
         else:
             self.fail(f"a value of type `{scrutinee}` cannot be matched", item.location)
 
-        ends: list[tuple[str, list[Type], Location | None]] = []
+        before = self.uses_of(scope)
+        uses: list[tuple[str, dict[str, int]]] = []
+        ends: list[tuple[str, TypeStack, Location | None]] = []
         for arm, fields in zip(item.arms, pushed, strict=True):
-            arm_stack = [*stack, *fields]
+            self.restore_uses(scope, before)
+            arm_stack = TypeStack(stack.row, [*stack.types, *fields])
             self.check_body(arm.body, arm_stack, scope)
             label = f"`case {self.describe_pattern(arm.pattern)}`"
             ends.append((label, arm_stack, arm.location))
+            uses.append((f"in {label}", self.uses_of(scope)))
         if item.else_body is not None:
-            else_stack = list(stack)
+            self.restore_uses(scope, before)
+            else_stack = stack.copy()
             self.check_body(item.else_body, else_stack, scope)
             ends.append(("`else`", else_stack, item.location))
+            uses.append(("in `else`", self.uses_of(scope)))
+        self.join_branches("the arms of `match`", scope, before, uses, item.location)
 
         first_label, first_stack, _ = ends[0]
         for label, arm_stack, location in ends[1:]:
-            if not self.inference.unify_all(first_stack, arm_stack):
+            if not self.inference.unify_stacks(first_stack.whole(), arm_stack.whole()):
                 _, first, other = self.describe_stacks(stack, first_stack, arm_stack)
                 self.fail(
                     "the arms of `match` leave different stacks: "
                     f"{first} after {first_label}, {other} after {label}",
                     location,
                 )
-        stack[:] = first_stack
+        stack.become(first_stack)
 
     def check_literal_patterns(self, item: Match, scrutinee: Type) -> None:
         seen: set[object] = set()
@@ -945,82 +1216,205 @@ class Checker:
         )
 
     def check_call(
-        self, call: WordReference, stack: list[Type], scope: Scope | None = None
+        self, call: WordReference, stack: TypeStack, scope: Scope | None = None
     ) -> None:
         name = call.name
         if name in self.words:
             self.apply_effect(name, self.words[name].effect, stack, call.location)
         elif name in BUILTINS:
             builtin = BUILTINS[name]
+            self.require_depth(name, builtin.arguments, stack, call.location)
+            operands = stack.types[len(stack.types) - builtin.arguments :]
             self.apply_effect(name, builtin.effect, stack, call.location, builtin.takes)
+            if name in ("curry", "compose"):
+                self.settle_captured(name, operands, stack, call.location)
         elif name in STACK_WORDS:
             self.apply_stack_word(STACK_WORDS[name], stack, call.location)
         elif name in self.broken:
             raise _Abandon
+        elif name in self.hidden_locals:
+            self.fail(
+                f"`{name}` is a local, and locals are not visible inside a "
+                f"quotation; push `{name}` before the quotation and `curry` it",
+                call.location,
+            )
         else:
             known = [*(scope or {}), *self.words, *BUILTINS, *STACK_WORDS]
             self.fail(
                 f"unknown word `{name}`{self.suggestion(name, known)}", call.location
             )
 
-    def require_depth(
-        self, name: str, needed: int, stack: list[Type], location: Location | None
+    def settle_captured(
+        self,
+        name: str,
+        operands: list[Type],
+        stack: TypeStack,
+        location: Location | None,
     ) -> None:
-        if len(stack) >= needed:
+        result = self.inference.resolve(stack.types[-1])
+        assert result.effect is not None
+        effect = self.inference.generalize(result.effect)
+        stack.types[-1] = quotation_of(effect, result.args[0])
+        capture = Capture(name, tuple(operands), result.args[0], location)
+        if not self.decide_qualifier(capture):
+            self.captures.append(capture)
+
+    def decide_qualifier(self, capture: Capture) -> bool:
+        linear = False
+        for operand in self.inference.resolve_all(capture.operands):
+            if is_quotation(operand):
+                operand = operand.args[0]
+            if self.inference.has_unknowns(operand):
+                return False
+            linear = linear or self.is_linear(operand)
+        decided = LINEAR if linear else UNRESTRICTED
+        if not self.inference.unify(capture.qualifier, decided):
+            if linear:
+                self.fail(
+                    f"the quotation `{capture.name}` builds here holds something "
+                    "linear, so it is a linear quotation, but it is used as an "
+                    "unrestricted one",
+                    capture.location,
+                )
+            self.fail(
+                f"the quotation `{capture.name}` builds here holds nothing linear, "
+                "so it is an unrestricted quotation, but it is used as a linear one",
+                capture.location,
+            )
+        return True
+
+    def settle_captures(self) -> None:
+        pending, self.captures = self.captures, []
+        while pending:
+            waiting = [c for c in pending if not self.decide_qualifier(c)]
+            if len(waiting) == len(pending):
+                break
+            pending = waiting
+        for capture in pending:
+            self.fail(
+                f"`{capture.name}` cannot tell whether what it captures is linear, "
+                "because its type is never worked out",
+                capture.location,
+            )
+
+    def require_depth(
+        self, name: str, needed: int, stack: TypeStack, location: Location | None
+    ) -> None:
+        self.settle(stack)
+        if len(stack.types) >= needed:
+            return
+        if is_unknown_row(stack.row):
+            below = [
+                self.inference.fresh(
+                    f"the type of a value that `{name}` takes", location
+                )
+                for _ in range(needed - len(stack.types))
+            ]
+            row = self.inference.fresh_row()
+            self.inference.bind_row(stack.row, Stack(row, tuple(below)))
+            stack.become(Stack(row, (*below, *stack.types)))
             return
         values = "1 value" if needed == 1 else f"{needed} values"
-        holds = "is empty" if not stack else f"holds only {self.show(stack)}"
+        holds = (
+            "is empty" if not stack.types else f"holds only {self.show(stack.types)}"
+        )
         self.fail(f"`{name}` takes {values}, but the stack {holds}", location)
 
     def apply_effect(
         self,
         name: str,
         declared: Effect,
-        stack: list[Type],
+        stack: TypeStack,
         location: Location | None,
         takes: str | None = None,
     ) -> None:
         count = len(declared.inputs)
         self.require_depth(name, count, stack, location)
         effect = self.inference.instantiate(name, declared, location)
-        found = stack[len(stack) - count :]
+        found = stack.types[len(stack.types) - count :]
         expected = takes or format_types(declared.inputs)
+        constraints = quotation_constraints(declared.inputs)
+        if takes is None and constraints:
+            clauses = ", ".join(f"{v}: [ {e.describe()} ]" for v, e in constraints)
+            expected += f" where `{clauses}`"
         if not self.inference.unify_all(found, effect.inputs):
-            self.fail(f"`{name}` takes {expected}, found {self.show(found)}", location)
-        del stack[len(stack) - count :]
-        stack.extend(effect.outputs)
+            message = f"`{name}` takes {expected}, found {self.show(found)}"
+            if name == "compose":
+                first, second = self.inference.resolve_all(found)
+                if first.effect is not None and second.effect is not None:
+                    message = (
+                        f"`compose` takes {expected}, but the first leaves "
+                        f"{format_types(first.effect.outputs)} and the second "
+                        f"takes {format_types(second.effect.inputs)}"
+                    )
+            self.fail(message, location)
+        del stack.types[len(stack.types) - count :]
+
+        if effect.rows is None:
+            stack.types.extend(effect.outputs)
+        else:
+            input_row, output_row = effect.rows
+            below = self.inference.flatten(Stack(input_row))
+            if not self.inference.unify_stacks(stack.whole(), Stack(input_row)):
+                self.fail(self.describe_rest(name, below, stack), location)
+            stack.become(self.inference.flatten(Stack(output_row, effect.outputs)))
 
         for (unknown, constraint), (variable, _) in zip(
             effect.where, declared.where, strict=True
         ):
             if takes is not None:
                 message = f"`{name}` takes {takes}, found"
-                describe = self.describe_operands(message, found)
+                describe = self.describe_operands(message, found, constraint)
             else:
                 describe = self.describe_unmet(name, variable, constraint)
             self.require(Type(unknown), constraint, location, describe)
 
+    def describe_rest(self, name: str, below: Stack, stack: TypeStack) -> str:
+        subject = "the quotation given to `call`" if name == "call" else f"`{name}`"
+        have = self.inference.flatten(stack.whole())
+        if below.row == IMPLICIT_ROW or is_unknown_row(below.row):
+            count = len(below.types)
+            expected = format_types(below.types)
+            found = have.types[len(have.types) - count :] if count else have.types
+            found_text = self.show(found)
+        else:
+            expected = self.show_stack(below)
+            found_text = self.show_stack(have)
+        return (
+            f"{subject} takes {expected} from the rest of the stack, found {found_text}"
+        )
+
     def describe_operands(
-        self, message: str, found: list[Type]
+        self, message: str, found: list[Type], constraint: str
     ) -> Callable[[Type], str]:
-        return lambda _: f"{message} {self.show(found)}"
+        def describe(resolved: Type) -> str:
+            text = f"{message} {self.show(found)}"
+            if is_quotation(resolved):
+                if constraint == "Display":
+                    text += "; quotations cannot be displayed"
+                elif constraint != "Unrestricted":
+                    text += "; quotations have no equality or order"
+            return text
+
+        return describe
 
     def describe_unmet(
         self, name: str, variable: str, constraint: str
     ) -> Callable[[Type], str]:
         def describe(resolved: Type) -> str:
+            subject = "a linear quotation" if resolved == LINEAR else f"`{resolved}`"
             return (
-                f"`{resolved}` does not satisfy `{constraint}`, "
+                f"{subject} does not satisfy `{constraint}`, "
                 f"which `{name}` requires of its `{variable}`"
             )
 
         return describe
 
     def apply_stack_word(
-        self, word: StackWord, stack: list[Type], location: Location | None
+        self, word: StackWord, stack: TypeStack, location: Location | None
     ) -> None:
         self.require_depth(word.name, word.arguments, stack, location)
-        taken = stack[len(stack) - word.arguments :]
+        taken = stack.types[len(stack.types) - word.arguments :]
         for verb, positions in (("copy", word.copied()), ("discard", word.discarded())):
             for position in positions:
                 self.require(
@@ -1029,11 +1423,17 @@ class Checker:
                     location,
                     self.describe_linear(word.name, verb),
                 )
-        del stack[len(stack) - word.arguments :]
-        stack.extend(taken[position] for position in word.result)
+        del stack.types[len(stack.types) - word.arguments :]
+        stack.types.extend(taken[position] for position in word.result)
 
     def describe_linear(self, name: str, verb: str) -> Callable[[Type], str]:
         def describe(resolved: Type) -> str:
+            variable = self.qualifier_variable(resolved)
+            if variable is not None:
+                return (
+                    f"`{name}` cannot {verb} a value of type `{variable}`, which may "
+                    f"be linear; add `where {variable}: Unrestricted` to the signature"
+                )
             if is_type_variable(resolved):
                 return (
                     f"`{name}` cannot {verb} a value of type `{resolved}`, "
@@ -1086,3 +1486,7 @@ def check(program: Program, require_main: bool = False) -> CheckedProgram:
     if checker.errors:
         raise IndeErrors(sorted(checker.errors, key=error_order))
     return checked
+
+
+def times(count: int) -> str:
+    return {0: "never", 1: "once", 2: "twice"}.get(count, f"{count} times")

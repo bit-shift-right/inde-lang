@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from inde.type_model import BOOL, U32, UNIT, Effect, Type, option_of
+from inde.type_model import (
+    BOOL,
+    CHAR,
+    STR,
+    STRBUF,
+    U32,
+    UNIT,
+    Effect,
+    Type,
+    option_of,
+    quotation_of,
+)
 
 CONSTRAINTS: tuple[str, ...] = (
     "Unrestricted",
@@ -131,3 +142,41 @@ define("not", (BOOL,), (BOOL,), "a `bool`")
 
 define("print", (T,), (), "a value that can be displayed", "Display")
 define("unit", (), (UNIT,), "nothing")
+
+define("strbuf-new", (), (STRBUF,), "nothing")
+define("strbuf-push", (STRBUF, CHAR), (STRBUF,), "a `strbuf` and a `char`")
+define("strbuf-append", (STRBUF, STR), (STRBUF,), "a `strbuf` and a `str`")
+define("strbuf-len", (STRBUF,), (STRBUF, U32), "a `strbuf`")
+define("strbuf-snapshot", (STRBUF,), (STRBUF, STR), "a `strbuf`")
+define("strbuf-freeze", (STRBUF,), (STR,), "a `strbuf`")
+define("strbuf-from-str", (STR,), (STRBUF,), "a `str`")
+
+
+Q, Q1, Q2, R = Type("Q"), Type("Q1"), Type("Q2"), Type("R")
+
+
+def quotation(inputs: tuple[Type, ...], rows: tuple[str, str], qualifier: Type) -> Type:
+    return quotation_of(Effect(inputs, (), rows=rows), qualifier)
+
+
+BUILTINS["call"] = Builtin(
+    "call",
+    Effect((quotation((), ("..a", "..b"), Q),), (), rows=("..a", "..b")),
+    "a quotation",
+)
+BUILTINS["curry"] = Builtin(
+    "curry",
+    Effect(
+        (T, quotation((T,), ("..b", "..c"), Q)),
+        (quotation((), ("..b", "..c"), R),),
+    ),
+    "a value and a quotation that takes it",
+)
+BUILTINS["compose"] = Builtin(
+    "compose",
+    Effect(
+        (quotation((), ("..b", "..c"), Q1), quotation((), ("..c", "..d"), Q2)),
+        (quotation((), ("..b", "..d"), R),),
+    ),
+    "two quotations where the first leaves what the second takes",
+)

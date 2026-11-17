@@ -136,7 +136,6 @@ def test_an_error_in_a_branch_points_inside_the_branch() -> None:
 @pytest.mark.parametrize(
     ("source", "fragment"),
     [
-        ("word t ( -> ) [ 1 ] end", "quotations are not supported"),
         ("word t ( -> ) ? end", "`?` forms are not supported"),
     ],
 )
@@ -280,15 +279,6 @@ def test_let_errors(body: str, inputs: str, outputs: str, fragment: str) -> None
 def test_a_local_cannot_share_a_name_with_a_constructor() -> None:
     assert "`circle` already names a word" in body_fails(
         "let circle in end", "i32", "", SHAPES
-    )
-
-
-def test_linear_locals_wait_for_a_later_slice() -> None:
-    assert "linear locals are not supported" in body_fails(
-        "let h in h end", "Handle", "Handle", HANDLE
-    )
-    assert "linear locals are not supported" in body_fails(
-        "let buffer n in buffer end", "strbuf i32", "strbuf"
     )
 
 

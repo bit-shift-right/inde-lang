@@ -20,6 +20,7 @@ from inde.ast import (
     Literal,
     Match,
     Program,
+    Quotation,
     StringLiteral,
     While,
     WordReference,
@@ -42,14 +43,24 @@ from inde.numeric import (
     shift,
 )
 from inde.parser import Parser
-from inde.type_model import BOOL, FLOAT_TYPES, U32, UNIT, Type, from_number_type
+from inde.type_model import (
+    BOOL,
+    FLOAT_TYPES,
+    STRBUF,
+    U32,
+    UNIT,
+    Type,
+    from_number_type,
+)
 from inde.values import (
     Data,
+    Quoted,
     Value,
     array,
     boolean,
     character,
     none,
+    quoted,
     some,
     string,
 )
@@ -82,16 +93,21 @@ def display(value: Value) -> str:
     raise AssertionError(f"`{value.type}` has no display text")
 
 
-def inspect(value: Value) -> str:
+def inspect(value: Value, nested: bool = False) -> str:
     data = value.data
+    if isinstance(data, Quoted):
+        return "[ ... ]" if nested else str(value.type)
     if isinstance(data, Data):
-        parts = [inspect(field) for field in data.fields] + [data.constructor]
+        parts = [inspect(field, True) for field in data.fields] + [data.constructor]
         return " ".join(parts)
     if isinstance(data, tuple):
-        return " ".join(["{", *(inspect(element) for element in data), "}"])
+        return " ".join(["{", *(inspect(element, True) for element in data), "}"])
     if isinstance(data, bool):
         return display(value)
     if isinstance(data, str):
+        if value.type == STRBUF:
+            delim = '"'
+            return f"{quote(data, delim)} strbuf-from-str"
         return quote(data, "'" if value.type.name == "char" else '"')
     suffix = "" if value.type.name in ("i32", "f32") else value.type.name
     return display(value) + suffix
@@ -109,6 +125,7 @@ class Frame:
     is_call: bool = False
     loop: While | None = None
     in_condition: bool = False
+    push: Value | None = None
 
     def finished(self) -> bool:
         return self.position == len(self.body)
@@ -136,6 +153,8 @@ class Interpreter:
                 frames.pop()
                 if frame.is_call:
                     calls -= 1
+                if frame.push is not None:
+                    stack.append(frame.push)
                 if frame.loop is not None:
                     self.continue_loop(frame, frames, stack)
                 continue
@@ -167,17 +186,37 @@ class Interpreter:
                 stack.append(frame.locals[item.name])
                 continue
 
-            callee = self.declared_body(item)
-            if callee is None:
-                self.run_item(item, stack)
+            if isinstance(item, Quotation):
+                stack.append(quoted((item.body,) if item.body else ()))
                 continue
 
-            while frames and frames[-1].finished() and frames[-1].loop is None:
+            if isinstance(item, WordReference) and item.name == "call":
+                data = stack.pop().data
+                assert isinstance(data, Quoted)
+                callee = data.parts
+            else:
+                declared = self.declared_body(item)
+                if declared is None:
+                    self.run_item(item, stack)
+                    continue
+                callee = (declared,)
+
+            while (
+                frames
+                and frames[-1].finished()
+                and frames[-1].loop is None
+                and frames[-1].push is None
+            ):
                 if frames.pop().is_call:
                     calls -= 1
             if calls >= MAX_CALL_DEPTH:
                 raise IndeTrap("call depth exceeded", item.location)
-            frames.append(Frame(callee, {}, is_call=True))
+            frames.append(Frame((), {}, is_call=True))
+            for part in reversed(callee):
+                if isinstance(part, Value):
+                    frames.append(Frame((), {}, push=part))
+                else:
+                    frames.append(Frame(part, {}))
             calls += 1
             self.deepest = max(self.deepest, calls)
 
@@ -289,6 +328,9 @@ class Interpreter:
         count = BUILTINS[name].arguments
         operands = stack[len(stack) - count :]
         del stack[len(stack) - count :]
+        if base.startswith("strbuf-"):
+            stack.extend(self.strbuf_operation(base, operands))
+            return
 
         checked = modifier == "checked"
         try:
@@ -307,6 +349,8 @@ class Interpreter:
     def compute(self, base: str, mode: str, operands: list[Value]) -> Value | None:
         if base == "unit":
             return UNIT_VALUE
+        if base in ("curry", "compose"):
+            return self.quotation_operation(base, operands)
         first = operands[0]
         if base == "print":
             print(display(first), file=self.output)
@@ -346,6 +390,32 @@ class Interpreter:
         if base in ("bit-and", "bit-or", "bit-xor"):
             return Value(number_type, bitwise(base, number_type, a, b))
         return Value(number_type, integer_arithmetic(base, mode, number_type, a, b))
+
+    def quotation_operation(self, base: str, operands: list[Value]) -> Value:
+        first, second = operands
+        assert isinstance(second.data, Quoted)
+        if base == "curry":
+            return quoted((first, *second.data.parts))
+        assert isinstance(first.data, Quoted)
+        return quoted(first.data.parts + second.data.parts)
+
+    def strbuf_operation(self, base: str, operands: list[Value]) -> list[Value]:
+        if base == "strbuf-new":
+            return [Value(STRBUF, "")]
+        text = operands[0].data
+        assert isinstance(text, str)
+        if base == "strbuf-from-str":
+            return [Value(STRBUF, text)]
+        if base in ("strbuf-push", "strbuf-append"):
+            addition = operands[1].data
+            assert isinstance(addition, str)
+            return [Value(STRBUF, text + addition)]
+        if base == "strbuf-len":
+            return [operands[0], Value(U32, len(text.encode("utf-8")))]
+        if base == "strbuf-snapshot":
+            return [operands[0], string(text)]
+        assert base == "strbuf-freeze", base
+        return [string(text)]
 
     def boolean_operation(self, base: str, operands: list[Value]) -> bool:
         a = operands[0].data
@@ -395,7 +465,6 @@ class Session:
             self.declare(Program(declarations=(parsed,)))
 
     def known_types(self) -> dict[str, int]:
-        # The types declared on earlier lines, with their parameter counts
         return {name: info.parameters for name, info in self.checker.types.items()}
 
     def is_incomplete(self, text: str) -> bool:
