@@ -5,8 +5,12 @@ from dataclasses import dataclass
 from inde.type_model import (
     BOOL,
     CHAR,
+    FLOAT_TYPES,
+    INTEGER_TYPES,
+    NUMBER_TYPES,
     STR,
     STRBUF,
+    U8,
     U32,
     UNIT,
     Effect,
@@ -249,3 +253,42 @@ BUILTINS["arraybuf-consume"] = Builtin(
     ),
     "an `arraybuf` and a quotation to run on each element",
 )
+
+
+define("str-len", (STR,), (U32,), "a `str`")
+define("str-concat", (STR, STR), (STR,), "two `str` values")
+define(
+    "str-slice",
+    (STR, U32, U32),
+    (option_of(STR),),
+    "a `str` and two `u32` byte offsets, start and end",
+)
+define("str-char-at", (STR, U32), (option_of(CHAR),), "a `str` and a `u32` byte offset")
+define("str-to-bytes", (STR,), (array_of(U8),), "a `str`")
+define("bytes-to-str", (array_of(U8),), (result_of(STR, U32),), "an `array[u8]`")
+define("char-utf8-len", (CHAR,), (U32,), "a `char`")
+define("str-from-char", (CHAR,), (STR,), "a `char`")
+
+
+CONVERSIONS: dict[str, Type] = {
+    **{f"to-{number_type}": number_type for number_type in NUMBER_TYPES},
+    "to-char": CHAR,
+}
+
+
+def conversion_forms(source: Type, target: Type) -> tuple[str, ...]:
+    if source in INTEGER_TYPES and target in INTEGER_TYPES:
+        return ("", "wrap", "sat", "checked")
+    if source in INTEGER_TYPES and target in FLOAT_TYPES:
+        return ("", "checked", "ieee")
+    if source in FLOAT_TYPES and target in FLOAT_TYPES:
+        return ("", "checked", "ieee")
+    if source in FLOAT_TYPES and target in INTEGER_TYPES:
+        return ("", "sat", "checked")
+    if source == CHAR and target == U32:
+        return ("", "wrap", "sat", "checked")
+    if source == U32 and target == CHAR:
+        return ("", "checked")
+    if source == CHAR and target == CHAR:
+        return ("", "checked")
+    return ()

@@ -238,3 +238,51 @@ def format_float(value: float, number_type: Type) -> str:
     mantissa = digits[0] + ("." + digits[1:] if len(digits) > 1 else "")
     exponent_sign = "-" if exponent < 0 else "+"
     return f"{sign}{mantissa}e{exponent_sign}{abs(exponent):02d}"
+
+
+def integer_to_integer(value: int, mode: str, target: Type) -> int:
+    low, high = integer_range(target)
+    if low <= value <= high:
+        return value
+    if mode == "wrap":
+        return wrap_integer(value, target)
+    if mode == "sat":
+        return saturate_integer(value, target)
+    raise Failure("value out of range")
+
+
+def integer_to_float(value: int, target: Type) -> float:
+    if target != F32 or abs(value) < 1 << 53:
+        return round_to(target, float(value))
+    magnitude = abs(value)
+    shift = magnitude.bit_length() - 24
+    kept, rest = divmod(magnitude, 1 << shift)
+    half = 1 << (shift - 1)
+    if rest > half or (rest == half and kept & 1):
+        kept += 1
+    return math.copysign(float(kept << shift), value)
+
+
+def float_to_integer(value: float, mode: str, target: Type) -> int:
+    low, high = integer_range(target)
+    if math.isnan(value):
+        if mode == "sat":
+            return 0
+        raise Failure("NaN has no integer value")
+    if math.isinf(value):
+        if mode == "sat":
+            return high if value > 0 else low
+        raise Failure("infinity has no integer value")
+    exact = math.trunc(value)
+    if low <= exact <= high:
+        return exact
+    if mode == "sat":
+        return saturate_integer(exact, target)
+    raise Failure("value out of range")
+
+
+def float_to_float(value: float, mode: str, target: Type) -> float:
+    result = round_to(target, value)
+    if math.isinf(result) and not math.isinf(value) and mode != "ieee":
+        raise Failure("float overflow")
+    return result

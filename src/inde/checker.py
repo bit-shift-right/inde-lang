@@ -38,9 +38,11 @@ from inde.ast import (
 from inde.builtins import (
     BUILTINS,
     CONSTRAINTS,
+    CONVERSIONS,
     IMPLIED_CONSTRAINTS,
     STACK_WORDS,
     StackWord,
+    conversion_forms,
 )
 from inde.errors import IndeError, IndeErrors
 from inde.inference import Inference
@@ -50,7 +52,9 @@ from inde.type_model import (
     BOOL,
     CHAR,
     CORE_LINEAR_TYPES,
+    F32,
     FLOAT_TYPES,
+    I32,
     IMPLICIT_ROW,
     INTEGER_TYPES,
     LINEAR,
@@ -301,7 +305,7 @@ class Checker:
         )
 
     def claim_name(self, name: str, location: Location | None) -> None:
-        if name in BUILTINS or name in STACK_WORDS:
+        if name in BUILTINS or name in STACK_WORDS or name in CONVERSIONS:
             self.fail(f"`{name}` is a built-in word and cannot be redefined", location)
         if name in self.words:
             earlier = self.words[name].location
@@ -1028,6 +1032,7 @@ class Checker:
             name in self.words
             or name in BUILTINS
             or name in STACK_WORDS
+            or name in CONVERSIONS
             or name in self.broken
         )
 
@@ -1349,6 +1354,8 @@ class Checker:
         name = call.name
         if name in self.words:
             self.apply_effect(name, self.words[name].effect, stack, call.location)
+        elif name.partition(".")[0] in CONVERSIONS:
+            self.check_conversion(name, stack, call.location)
         elif name in BUILTINS:
             builtin = BUILTINS[name]
             self.require_depth(name, builtin.arguments, stack, call.location)
@@ -1367,10 +1374,73 @@ class Checker:
                 call.location,
             )
         else:
-            known = [*(scope or {}), *self.words, *BUILTINS, *STACK_WORDS]
+            known = [
+                *(scope or {}),
+                *self.words,
+                *BUILTINS,
+                *STACK_WORDS,
+                *CONVERSIONS,
+            ]
             self.fail(
                 f"unknown word `{name}`{self.suggestion(name, known)}", call.location
             )
+
+    def check_conversion(
+        self, name: str, stack: TypeStack, location: Location | None
+    ) -> None:
+        word, _, modifier = name.partition(".")
+        target = CONVERSIONS[word]
+        self.require_depth(name, 1, stack, location)
+        source = self.inference.resolve(stack.types[-1])
+        if self.inference.has_unknowns(source):
+            self.fail(
+                f"`{name}` converts the value below it, but its type is not known "
+                "at this point",
+                location,
+            )
+        if is_type_variable(source):
+            forms = self.generic_conversion_forms(source, target)
+        else:
+            forms = conversion_forms(source, target)
+        if not forms:
+            message = f"there is no conversion from `{source}` to `{target}`"
+            if target == CHAR:
+                message += "; only a `u32` converts to a `char`"
+            elif source == CHAR:
+                message += "; a `char` converts only to `u32`"
+            elif is_type_variable(source):
+                message += (
+                    f"; add `where {source}: Integer`, `where {source}: Float` or "
+                    f"`where {source}: Num` to the signature"
+                )
+            self.fail(message, location)
+        if modifier not in forms:
+            available = ", ".join(
+                f"`{word}.{form}`" if form else f"`{word}`" for form in forms
+            )
+            self.fail(
+                f"`{word}` has no `.{modifier}` form when converting from "
+                f"`{source}`; its forms are {available}",
+                location,
+            )
+        stack.types[-1] = option_of(target) if modifier == "checked" else target
+
+    def generic_conversion_forms(self, variable: Type, target: Type) -> tuple[str, ...]:
+        assumed = self.assumptions.get(variable.name, frozenset())
+        if "Integer" in assumed:
+            kinds: tuple[Type, ...] = (I32,)
+        elif "Float" in assumed:
+            kinds = (F32,)
+        elif "Num" in assumed:
+            kinds = (I32, F32)
+        else:
+            return ()
+        forms = conversion_forms(kinds[0], target)
+        for kind in kinds[1:]:
+            forms = tuple(
+                form for form in forms if form in conversion_forms(kind, target)
+            )
+        return forms
 
     def settle_captured(
         self,
@@ -1580,7 +1650,7 @@ class Checker:
         return describe
 
     def suggestion(self, name: str, known: Iterable[str]) -> str:
-        matches = difflib.get_close_matches(name, list(known), n=1)
+        matches = difflib.get_close_matches(name, list(known), n=1, cutoff=0.7)
         return f"; did you mean `{matches[0]}`?" if matches else ""
 
     def check_main(self, require_main: bool) -> None:

@@ -27,7 +27,7 @@ from inde.ast import (
     While,
     WordReference,
 )
-from inde.builtins import BUILTINS, STACK_WORDS, StackWord
+from inde.builtins import BUILTINS, CONVERSIONS, STACK_WORDS, StackWord
 from inde.checker import Checker, ConstantInfo, WordInfo, error_order
 from inde.errors import IndeError, IndeErrors, IndeTrap
 from inde.lexer import Location, quote, tokenize
@@ -38,17 +38,24 @@ from inde.numeric import (
     compare,
     count_bits,
     float_arithmetic,
+    float_to_float,
+    float_to_integer,
     float_unary,
     format_float,
     integer_arithmetic,
+    integer_to_float,
+    integer_to_integer,
     integer_unary,
     shift,
 )
 from inde.parser import Parser
 from inde.type_model import (
     BOOL,
+    CHAR,
     FLOAT_TYPES,
+    STR,
     STRBUF,
+    U8,
     U32,
     UNIT,
     Type,
@@ -337,6 +344,8 @@ class Interpreter:
                     self.construct(word, stack)
             elif name in STACK_WORDS:
                 self.run_stack_word(STACK_WORDS[name], stack)
+            elif name.partition(".")[0] in CONVERSIONS:
+                stack.append(self.convert(name, stack.pop(), item.location))
             else:
                 self.run_builtin(name, stack, item.location)
         else:
@@ -395,6 +404,9 @@ class Interpreter:
         del stack[len(stack) - count :]
         if base.startswith("strbuf-"):
             stack.extend(self.strbuf_operation(base, operands))
+            return
+        if base in TEXT_WORDS:
+            stack.extend(self.text_operation(base, operands, location))
             return
         checked = modifier == "checked"
         if base.startswith("arraybuf-"):
@@ -553,6 +565,88 @@ class Interpreter:
             return [first, Value(result, Data("err", (new,)))]
         index_trap(name, f"index {index}, length {len(buffer)}", location)
 
+    def text_operation(
+        self, base: str, operands: list[Value], location: Location | None
+    ) -> list[Value]:
+        first = operands[0].data
+        if base == "bytes-to-str":
+            assert isinstance(first, tuple)
+            raw = bytearray()
+            for element in first:
+                assert isinstance(element.data, int)
+                raw.append(element.data)
+            result = result_of(STR, U32)
+            try:
+                return [Value(result, Data("ok", (string(raw.decode()),)))]
+            except UnicodeDecodeError as error:
+                return [Value(result, Data("err", (Value(U32, error.start),)))]
+        assert isinstance(first, str)
+        if base == "char-utf8-len":
+            return [Value(U32, len(first.encode()))]
+        if base == "str-from-char":
+            return [string(first)]
+        encoded = first.encode()
+        if base == "str-len":
+            return [Value(U32, len(encoded))]
+        if base == "str-to-bytes":
+            return [array(U8, tuple(Value(U8, byte) for byte in encoded))]
+        if base == "str-concat":
+            second = operands[1].data
+            assert isinstance(second, str)
+            if len(encoded) + len(second.encode()) > MAX_LENGTH:
+                raise IndeTrap("the string is too long in `str-concat`", location)
+            return [string(first + second)]
+        start = operands[1].data
+        assert isinstance(start, int)
+        if base == "str-char-at":
+            if start < len(encoded) and is_boundary(encoded, start):
+                length = utf8_length(encoded[start])
+                found = encoded[start : start + length].decode()
+                return [some(character(found))]
+            return [none(CHAR)]
+        assert base == "str-slice", base
+        end = operands[2].data
+        assert isinstance(end, int)
+        fits = start <= end <= len(encoded)
+        if fits and is_boundary(encoded, start) and is_boundary(encoded, end):
+            return [some(string(encoded[start:end].decode()))]
+        return [none(STR)]
+
+    def convert(self, name: str, value: Value, location: Location | None) -> Value:
+        word, _, modifier = name.partition(".")
+        target = CONVERSIONS[word]
+        checked = modifier == "checked"
+        try:
+            result = self.converted(value, target, "" if checked else modifier)
+        except Failure as failure:
+            if checked:
+                return none(target)
+            raise IndeTrap(
+                f"{failure.reason} in `{name}` ({describe_operands([value])})",
+                location,
+            ) from None
+        return some(result) if checked else result
+
+    def converted(self, value: Value, target: Type, mode: str) -> Value:
+        source, data = value.type, value.data
+        if source == CHAR:
+            assert isinstance(data, str)
+            return value if target == CHAR else Value(U32, ord(data))
+        if target == CHAR:
+            assert isinstance(data, int)
+            if 0xD800 <= data <= 0xDFFF or data > 0x10FFFF:
+                raise Failure("not a Unicode scalar value")
+            return character(chr(data))
+        if source in FLOAT_TYPES:
+            assert isinstance(data, float)
+            if target in FLOAT_TYPES:
+                return Value(target, float_to_float(data, mode, target))
+            return Value(target, float_to_integer(data, mode, target))
+        assert isinstance(data, int) and not isinstance(data, bool)
+        if target in FLOAT_TYPES:
+            return Value(target, integer_to_float(data, target))
+        return Value(target, integer_to_integer(data, mode, target))
+
     def strbuf_operation(self, base: str, operands: list[Value]) -> list[Value]:
         if base == "strbuf-new":
             return [Value(STRBUF, "")]
@@ -596,6 +690,32 @@ class Interpreter:
             return 0
         print(display(result.fields[0]), file=error_output or sys.stderr)
         return 1
+
+
+TEXT_WORDS = (
+    "str-len",
+    "str-concat",
+    "str-slice",
+    "str-char-at",
+    "str-to-bytes",
+    "bytes-to-str",
+    "char-utf8-len",
+    "str-from-char",
+)
+
+
+def is_boundary(encoded: bytes, offset: int) -> bool:
+    return offset == len(encoded) or encoded[offset] & 0xC0 != 0x80
+
+
+def utf8_length(first_byte: int) -> int:
+    if first_byte < 0x80:
+        return 1
+    if first_byte < 0xE0:
+        return 2
+    if first_byte < 0xF0:
+        return 3
+    return 4
 
 
 def index_trap(name: str, details: str, location: Location | None) -> NoReturn:
