@@ -135,22 +135,25 @@ def test_comparison_and_booleans() -> None:
 
 
 def test_overflow_traps() -> None:
-    message = get_trap_message("2147483647 1 + print")
+    message = get_trap_message("2147483647 1 let a b in a b + print end")
     assert message == "integer overflow in `+` (i32 2147483647, i32 1)"
-    assert get_trap_message("200u8 100u8 + print") == (
+    assert get_trap_message("200u8 100u8 let a b in a b + print end") == (
         "integer overflow in `+` (u8 200u8, u8 100u8)"
     )
 
 
 def test_a_trap_stops_the_program_at_once() -> None:
-    source = 'word main ( -> ) "before" print 2147483647 1 + print "after" print end'
+    source = (
+        'word main ( -> ) "before" print '
+        '2147483647 1 let a b in a b + print end "after" print end'
+    )
     checked = check(parse(source))
     output = io.StringIO()
     with pytest.raises(IndeTrap) as trap:
         Interpreter(checked.words, checked.constants, output).run_main()
     assert output.getvalue() == "before\n"
     assert trap.value.location is not None
-    assert (trap.value.location.line, trap.value.location.column) == (1, 46)
+    assert (trap.value.location.line, trap.value.location.column) == (1, 61)
 
 
 def test_checked_addition_returns_an_option() -> None:
@@ -312,7 +315,7 @@ def test_arithmetic_and_modifiers() -> None:
     assert printed("6 7 * print 5 7 - print") == ["42", "-2"]
     assert printed("200u8 100u8 +.wrap print 200u8 100u8 +.sat print") == ["44", "255"]
     assert (
-        get_trap_message("0u8 1u8 - print")
+        get_trap_message("0u8 1u8 let a b in a b - print end")
         == "integer overflow in `-` (u8 0u8, u8 1u8)"
     )
     session = session_after("0u8 1u8 -.checked", "3 4 *.checked")
@@ -321,9 +324,12 @@ def test_arithmetic_and_modifiers() -> None:
 
 def test_division() -> None:
     assert printed("-7 2 / print -7 2 % print") == ["-3", "-1"]
-    assert get_trap_message("1 0 / print") == "division by zero in `/` (i32 1, i32 0)"
     assert (
-        get_trap_message("1 0 %.wrap print")
+        get_trap_message("1 0 let a b in a b / print end")
+        == "division by zero in `/` (i32 1, i32 0)"
+    )
+    assert (
+        get_trap_message("1 0 let a b in a b %.wrap print end")
         == "division by zero in `%.wrap` (i32 1, i32 0)"
     )
     assert printed("-5 abs print 5 neg print") == ["5", "-5"]
@@ -335,11 +341,15 @@ def test_float_arithmetic() -> None:
     session = session_after("1.5 2.0 *", "1.0 0.0 /.checked", "1.0 0.0 /.ieee")
     assert session.stack == [Value(F32, 3.0), none(F32), Value(F32, float("inf"))]
     assert (
-        get_trap_message("1.0 0.0 / print")
+        get_trap_message("1.0 0.0 let a b in a b / print end")
         == "division by zero in `/` (f32 1.0, f32 0.0)"
     )
-    assert "float overflow in `*`" in get_trap_message("3e38 10.0 * print")
-    assert "invalid float operation in `sqrt`" in get_trap_message("-1.0 sqrt print")
+    assert "float overflow in `*`" in get_trap_message(
+        "3e38 10.0 let a b in a b * print end"
+    )
+    assert "invalid float operation in `sqrt`" in get_trap_message(
+        "-1.0 let x in x sqrt print end"
+    )
 
 
 def test_bits() -> None:
@@ -348,7 +358,7 @@ def test_bits() -> None:
         "3",
     ]
     assert printed("1u8 3u32 shl print 0u8 bit-not print") == ["8", "255"]
-    assert get_trap_message("1u8 8u32 shl print") == (
+    assert get_trap_message("1u8 8u32 let a b in a b shl print end") == (
         "shift amount out of range in `shl` (u8 1u8, u32 8u32)"
     )
     session = session_after("1u8 8u32 shl.checked", "1u8 9u32 shl.wrap")

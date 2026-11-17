@@ -101,10 +101,19 @@ def test_conversions(line: str, stack: str) -> None:
 @pytest.mark.parametrize(
     ("line", "message"),
     [
-        ("300 to-u8", "value out of range in `to-u8` (i32 300)"),
-        ("1.0e10 to-i32", "value out of range in `to-i32` (f32 10000000000.0)"),
-        ("1.0e300f64 to-f32", "float overflow in `to-f32` (f64 1e+300f64)"),
-        ("55296u32 to-char", "not a Unicode scalar value in `to-char` (u32 55296u32)"),
+        ("300 let x in x to-u8 end", "value out of range in `to-u8` (i32 300)"),
+        (
+            "1.0e10 let x in x to-i32 end",
+            "value out of range in `to-i32` (f32 10000000000.0)",
+        ),
+        (
+            "1.0e300f64 let x in x to-f32 end",
+            "float overflow in `to-f32` (f64 1e+300f64)",
+        ),
+        (
+            "55296u32 let x in x to-char end",
+            "not a Unicode scalar value in `to-char` (u32 55296u32)",
+        ),
     ],
 )
 def test_a_failed_conversion_traps(line: str, message: str) -> None:

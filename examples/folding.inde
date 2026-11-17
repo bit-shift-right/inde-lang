@@ -1,0 +1,17 @@
+const SECONDS_PER_DAY = 86400
+
+word seconds-per-year ( -> i32 )
+  SECONDS_PER_DAY 365 *
+end
+
+word per-person ( i32 i32 -> Option[i32] )
+  /.checked
+end
+
+word main ( -> )
+  seconds-per-year print
+  100 4 per-person match case some print case none "nobody" print end
+  100 0 per-person match case some print case none "nobody" print end
+  200u8 100u8 +.sat print
+  300 to-u8.wrap print
+end

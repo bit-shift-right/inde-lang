@@ -45,6 +45,7 @@ from inde.builtins import (
     conversion_forms,
 )
 from inde.errors import IndeError, IndeErrors
+from inde.folding import CertainFailure, Folder
 from inde.inference import Inference
 from inde.lexer import Location, quote
 from inde.parser import CORE_TYPE_ARGUMENTS, parse
@@ -804,8 +805,14 @@ class Checker:
         self, body: Body, stack: TypeStack, scope: Scope | None = None
     ) -> TypeStack:
         scope = scope or {}
+        folder = Folder(self.words, self.constants)
         for item in body:
             self.check_item(item, stack, scope)
+            local = isinstance(item, WordReference) and item.name in scope
+            try:
+                folder.step(item, local)
+            except CertainFailure as failure:
+                self.fail(failure.message, failure.location)
         return stack
 
     def check_item(self, item: Item, stack: TypeStack, scope: Scope) -> None:

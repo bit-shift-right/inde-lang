@@ -68,15 +68,15 @@ def test_array_words(line: str, stack: str) -> None:
     ("line", "message"),
     [
         (
-            "{ 1 2 } 5u32 array-get",
+            "{ 1 2 } 5u32 let a i in a i array-get end",
             "index out of range in `array-get` (index 5, length 2)",
         ),
         (
-            "{ 1 2 } 2u32 1u32 array-slice",
+            "{ 1 2 } 2u32 1u32 let a s e in a s e array-slice end",
             "index out of range in `array-slice` (start 2, end 1, length 2)",
         ),
         (
-            "{ 1 2 } 0u32 3u32 array-slice",
+            "{ 1 2 } 0u32 3u32 let a s e in a s e array-slice end",
             "index out of range in `array-slice` (start 0, end 3, length 2)",
         ),
     ],

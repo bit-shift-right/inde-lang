@@ -95,7 +95,7 @@ def test_recursion_that_ends() -> None:
 
 
 def test_a_trap_inside_a_branch() -> None:
-    assert get_trap_message("true if 1 0 / print end") == (
+    assert get_trap_message("true if 1 0 let a b in a b / print end end") == (
         "division by zero in `/` (i32 1, i32 0)"
     )
 
