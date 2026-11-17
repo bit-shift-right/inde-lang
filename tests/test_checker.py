@@ -127,16 +127,6 @@ def test_errors_point_at_the_item() -> None:
     assert line_of(source) == 3
 
 
-@pytest.mark.parametrize(
-    ("source", "fragment"),
-    [
-        ("word t ( -> ) ? end", "`?` forms are not supported"),
-    ],
-)
-def test_later_slices_are_reported_as_unsupported(source: str, fragment: str) -> None:
-    assert fragment in get_failure_message(source)
-
-
 def test_one_error_per_word_in_source_order() -> None:
     source = (
         "word a ( -> ) 1 end\n"

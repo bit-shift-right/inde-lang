@@ -20,6 +20,7 @@ from inde.ast import (
     Literal,
     Match,
     Program,
+    Propagate,
     Quotation,
     StringLiteral,
     While,
@@ -126,6 +127,7 @@ class Frame:
     loop: While | None = None
     in_condition: bool = False
     push: Value | None = None
+    base: int = 0
 
     def finished(self) -> bool:
         return self.position == len(self.body)
@@ -144,7 +146,7 @@ class Interpreter:
         self.deepest = 0
 
     def execute(self, body: Body, stack: list[Value]) -> None:
-        frames = [Frame(body, {}, is_call=True)]
+        frames = [Frame(body, {}, is_call=True, base=len(stack))]
         calls = 1
         self.deepest = max(self.deepest, calls)
         while frames:
@@ -189,17 +191,24 @@ class Interpreter:
             if isinstance(item, Quotation):
                 stack.append(quoted((item.body,) if item.body else ()))
                 continue
+            if isinstance(item, Propagate):
+                if self.propagate(stack.pop(), stack, frames):
+                    calls -= 1
+                continue
 
             if isinstance(item, WordReference) and item.name == "call":
                 data = stack.pop().data
                 assert isinstance(data, Quoted)
                 callee = data.parts
+                base = len(stack)
             else:
                 declared = self.declared_body(item)
                 if declared is None:
                     self.run_item(item, stack)
                     continue
                 callee = (declared,)
+                assert isinstance(item, WordReference)
+                base = len(stack) - len(self.words[item.name].effect.inputs)
 
             while (
                 frames
@@ -211,7 +220,7 @@ class Interpreter:
                     calls -= 1
             if calls >= MAX_CALL_DEPTH:
                 raise IndeTrap("call depth exceeded", item.location)
-            frames.append(Frame((), {}, is_call=True))
+            frames.append(Frame((), {}, is_call=True, base=base))
             for part in reversed(callee):
                 if isinstance(part, Value):
                     frames.append(Frame((), {}, push=part))
@@ -219,6 +228,19 @@ class Interpreter:
                     frames.append(Frame(part, {}))
             calls += 1
             self.deepest = max(self.deepest, calls)
+
+    def propagate(self, value: Value, stack: list[Value], frames: list[Frame]) -> bool:
+        data = value.data
+        assert isinstance(data, Data)
+        if data.constructor in ("ok", "some"):
+            stack.append(data.fields[0])
+            return False
+        while not frames[-1].is_call:
+            frames.pop()
+        call = frames.pop()
+        del stack[call.base :]
+        stack.append(value)
+        return True
 
     def continue_loop(
         self, finished: Frame, frames: list[Frame], stack: list[Value]

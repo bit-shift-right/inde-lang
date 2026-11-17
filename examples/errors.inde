@@ -1,0 +1,61 @@
+type Fault = division-by-zero | negative( i32 )
+
+word divide ( i32 i32 -> Result[i32, Fault] )
+  dup 0 == if
+    drop drop division-by-zero err
+  else
+    / ok
+  end
+end
+
+word check-positive ( i32 -> Result[i32, Fault] )
+  dup 0 < if negative err else ok end
+end
+
+word average ( i32 i32 i32 -> Result[i32, Fault] )
+  check-positive ? swap check-positive ? + swap divide ? ok
+end
+
+word sum-of-squares ( i32 i32 -> Option[i32] )
+  dup *.checked ? swap dup *.checked ? +.checked ? some
+end
+
+word report ( i32 i32 -> str )
+  sum-of-squares let total in
+    strbuf-new "sum of squares: " strbuf-append
+    total match
+      case some drop "fine" strbuf-append
+      case none "too big" strbuf-append
+    end
+    strbuf-freeze
+  end
+end
+
+word explain ( Result[i32, Fault] -> Result[i32, str] )
+  match
+    case ok ok
+    case err match
+      case division-by-zero "division by zero" err
+      case negative drop "a negative value" err
+    end
+  end
+end
+
+word describe ( Result[i32, Fault] -> )
+  explain match
+    case ok print
+    case err print
+  end
+end
+
+word main ( -> Result[unit, str] )
+  2 10 20 average describe
+  0 10 20 average describe
+  2 -1 20 average describe
+  3 4 report print
+  100000 100000 report print
+  10 2 divide explain ? print
+  1 0 divide explain ? print
+  "not reached" print
+  unit ok
+end

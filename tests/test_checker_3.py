@@ -386,24 +386,77 @@ def test_equality_is_derived(body: str, inputs: str, declarations: str) -> None:
 @pytest.mark.parametrize(
     ("inputs", "declarations", "found"),
     [
-        ("Shape Shape", SHAPES, "`Shape Shape`"),
-        ("array[f32] array[f32]", "", "`array[f32] array[f32]`"),
-        ("strbuf strbuf", "", "`strbuf strbuf`"),
+        (
+            "Shape Shape",
+            SHAPES,
+            (
+                "`Shape Shape`; `Shape` has no equality, because it holds `f32` values,"
+                " whose equality is only partial"
+            ),
+        ),
+        (
+            "array[f32] array[f32]",
+            "",
+            (
+                "`array[f32] array[f32]`; `array[f32]` has no equality, because it "
+                "holds `f32` values, whose equality is only partial"
+            ),
+        ),
+        ("strbuf strbuf", "", "`strbuf strbuf`; `strbuf` has no equality"),
         (
             "Outer Outer",
             SHAPES + "type Outer = outer( i32 Shape )\n",
-            "`Outer Outer`",
+            (
+                "`Outer Outer`; `Outer` has no equality, because it holds `f32` values,"
+                " whose equality is only partial"
+            ),
         ),
         (
             "Chain Chain",
             "type Chain = link( f32 Chain ) | stop\n",
-            "`Chain Chain`",
+            (
+                "`Chain Chain`; `Chain` has no equality, because it holds `f32` values,"
+                " whose equality is only partial"
+            ),
+        ),
+        (
+            "Op Op",
+            "type Op = op( str [ i32 -> i32 ] )\n",
+            (
+                "`Op Op`; `Op` has no equality, because it holds quotations, "
+                "which have no equality"
+            ),
+        ),
+        (
+            "Option[strbuf] Option[strbuf]",
+            "",
+            (
+                "`Option[strbuf] Option[strbuf]`; `Option[strbuf]` has no equality, "
+                "because it holds `strbuf` values, which have no equality"
+            ),
         ),
     ],
 )
 def test_what_is_not_eq(inputs: str, declarations: str, found: str) -> None:
     message = body_fails("==", inputs, "bool", declarations)
     assert message == f"`==` takes two values of the same type, found {found}"
+
+
+def test_equality_that_waits_on_a_type_variable() -> None:
+    declarations = "type Box[T] = box( T )\n"
+    assert body_fails("==", "Box[T] Box[T]", "bool", declarations) == (
+        "`==` takes two values of the same type, found `Box[T] Box[T]`; "
+        "`Box[T]` has no equality, because it holds `T` values, which may not "
+        "have equality; add `where T: Eq` to the signature"
+    )
+    check(parse(declarations + "word t ( Box[T] Box[T] -> bool ) where T: Eq == end"))
+
+
+def test_what_is_not_ordered() -> None:
+    assert body_fails("<", "Shape Shape", "bool", SHAPES) == (
+        "`<` takes two ordered values of the same type, found `Shape Shape`; "
+        "`Shape` has no order"
+    )
 
 
 def test_floats_are_only_partially_equal() -> None:

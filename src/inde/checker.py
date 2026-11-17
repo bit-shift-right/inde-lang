@@ -69,8 +69,10 @@ from inde.type_model import (
     is_type_variable,
     is_unknown,
     is_unknown_row,
+    option_of,
     quotation_constraints,
     quotation_of,
+    result_of,
     rows_of,
     substitute,
     variables_of,
@@ -135,6 +137,7 @@ class Local:
     second_use: Location | None = None
     in_loop: Location | None = None
     disagreement: tuple[str, str, Location | None] | None = None
+    at_exit: Location | None = None
 
 
 Scope = dict[str, Local]
@@ -191,6 +194,7 @@ class Checker:
         self.quotation_bounds: dict[str, Effect] = {}
         self.resolving_bounds: set[str] = set()
         self.hidden_locals: frozenset[str] = frozenset()
+        self.quotation_depth = 0
         self.declare_library()
 
     def declare_library(self) -> None:
@@ -207,9 +211,6 @@ class Checker:
 
     def fail(self, message: str, location: Location | None) -> NoReturn:
         raise IndeError(message, location)
-
-    def unsupported(self, what: str, location: Location | None) -> NoReturn:
-        self.fail(f"{what} are not supported by the checker yet", location)
 
     @contextmanager
     def recover(self) -> Iterator[None]:
@@ -647,6 +648,39 @@ class Checker:
             for field in self.variant_fields(constructor, checked_type)
         )
 
+    def explain_no_equality(self, checked_type: Type) -> str:
+        culprit = self.without_equality(checked_type, set())
+        if culprit is None:
+            return ""
+        if culprit == checked_type:
+            return f"; `{checked_type}` has no equality"
+        if culprit in FLOAT_TYPES:
+            held = f"`{culprit}` values, whose equality is only partial"
+        elif is_quotation(culprit):
+            held = "quotations, which have no equality"
+        elif is_type_variable(culprit):
+            held = (
+                f"`{culprit}` values, which may not have equality; "
+                f"add `where {culprit}: Eq` to the signature"
+            )
+        else:
+            held = f"`{culprit}` values, which have no equality"
+        return f"; `{checked_type}` has no equality, because it holds {held}"
+
+    def without_equality(self, checked_type: Type, visiting: set[Type]) -> Type | None:
+        if self.is_eq(checked_type, set()):
+            return None
+        if checked_type.name == "array":
+            return self.without_equality(checked_type.args[0], visiting)
+        if checked_type.name in self.variants and checked_type not in visiting:
+            visiting.add(checked_type)
+            for constructor in self.variants[checked_type.name]:
+                for field in self.variant_fields(constructor, checked_type):
+                    culprit = self.without_equality(field, visiting)
+                    if culprit is not None:
+                        return culprit
+        return checked_type
+
     def variant_fields(self, constructor: str, of_type: Type) -> tuple[Type, ...]:
         effect = self.words[constructor].effect
         parameters = effect.outputs[0].args
@@ -795,7 +829,7 @@ class Checker:
         elif isinstance(item, Quotation):
             self.check_quotation(item, stack, scope)
         elif isinstance(item, Propagate):
-            self.unsupported("`?` forms", item.location)
+            self.check_propagate(item, stack, scope)
         elif isinstance(item, If):
             self.check_if(item, stack, scope)
         elif isinstance(item, While):
@@ -818,15 +852,103 @@ class Checker:
             depth += 1
         return [format_types(stack[depth:]) for stack in resolved]
 
+    def check_propagate(self, item: Propagate, stack: TypeStack, scope: Scope) -> None:
+        location = item.location
+        if self.quotation_depth > 0:
+            self.fail("`?` is not allowed inside a quotation", location)
+        if self.current_word is None:
+            self.fail("`?` can only be used in the body of a word", location)
+        name = self.current_word
+        outputs = self.words[name].effect.outputs
+        result = outputs[0] if len(outputs) == 1 else None
+        if result is None or result.name not in ("Result", "Option"):
+            self.fail(
+                f"`?` needs `{name}` to return a `Result` or an `Option`, "
+                f"but it returns {format_types(outputs)}",
+                location,
+            )
+
+        rows = self.words[name].effect.rows
+        if rows is not None and rows[0] != rows[1]:
+            self.fail(
+                f"`?` cannot exit `{name}` early, because `{name}` turns "
+                f"`{rows[0]}` into `{rows[1]}`, and an early exit would leave "
+                f"`{rows[0]}`",
+                location,
+            )
+        self.require_depth("?", 1, stack, location)
+        row = self.inference.flatten(stack.whole()).row
+        if row != (IMPLICIT_ROW if rows is None else rows[0]):
+            self.fail(
+                f"`?` cannot exit `{name}` early here, because the stack below "
+                f"`{name}`'s own values is no longer the one it was called with",
+                location,
+            )
+        operand = stack.types.pop()
+        value = self.inference.fresh("the value `?` leaves", location)
+        if result.name == "Result":
+            expected = result_of(value, result.args[1])
+        else:
+            expected = option_of(value)
+        if not self.inference.unify(operand, expected):
+            self.fail(self.describe_propagate(name, result, operand), location)
+
+        for below in stack.types:
+            self.require(below, "Unrestricted", location, self.describe_discarded())
+        for local in scope.values():
+            if local.uses == 0 and local.at_exit is None:
+                local.at_exit = location
+        stack.types.append(value)
+
+    def describe_propagate(self, name: str, result: Type, operand: Type) -> str:
+        found = self.inference.resolve(operand)
+        kind = result.name
+        if found.name in ("Result", "Option") and found.name != kind:
+            return (
+                f"`?` here takes {'a `Result`' if kind == 'Result' else 'an `Option`'},"
+                f" because `{name}` returns `{result}`, found `{found}`; "
+                "`Option` and `Result` cannot be mixed"
+            )
+        if found.name == "Result":
+            return (
+                f"the error types differ: `?` found `{found}`, but `{name}` "
+                f"returns errors of type `{result.args[1]}`; convert with `match`"
+            )
+        article = "a `Result`" if kind == "Result" else "an `Option`"
+        return f"`?` takes {article}, found {self.show([found])}"
+
+    def describe_discarded(self) -> Callable[[Type], str]:
+        def describe(resolved: Type) -> str:
+            variable = self.qualifier_variable(resolved)
+            if variable is not None or is_type_variable(resolved):
+                shown = variable or resolved
+                return (
+                    f"a value of type `{shown}` on the stack would be discarded if "
+                    f"`?` exits early, and `{shown}` may be linear"
+                    + (
+                        f"; add `where {shown}: Unrestricted` to the signature"
+                        if variable is not None
+                        else ""
+                    )
+                )
+            return (
+                f"the linear `{resolved}` on the stack would be discarded if `?` "
+                "exits early; handle the failure with `match` instead"
+            )
+
+        return describe
+
     def check_quotation(self, item: Quotation, stack: TypeStack, scope: Scope) -> None:
         row = self.inference.fresh_row()
         inner = TypeStack(row)
         hidden = self.hidden_locals
         self.hidden_locals = hidden | scope.keys()
+        self.quotation_depth += 1
         try:
             self.check_body(item.body, inner, {})
         finally:
             self.hidden_locals = hidden
+            self.quotation_depth -= 1
         effect = Effect(outputs=tuple(inner.types), rows=(row, inner.row))
         stack.types.append(quotation_of(self.inference.generalize(effect)))
 
@@ -997,6 +1119,12 @@ class Checker:
         elif local.disagreement is not None:
             construct, detail, location = local.disagreement
             message = f"{construct} use {subject} differently: {detail}"
+        elif local.at_exit is not None:
+            message = (
+                f"{subject} would be discarded if this `?` exits early; use it "
+                "before the `?`, or handle the failure with `match`"
+            )
+            location = local.at_exit
         elif local.uses == 0:
             message = f"{subject} is never used"
             location = local.location
@@ -1394,6 +1522,12 @@ class Checker:
                     text += "; quotations cannot be displayed"
                 elif constraint != "Unrestricted":
                     text += "; quotations have no equality or order"
+            elif is_type_variable(resolved):
+                pass
+            elif constraint in ("Eq", "PartialEq"):
+                text += self.explain_no_equality(resolved)
+            elif constraint in ("Ord", "PartialOrd"):
+                text += f"; `{resolved}` has no order"
             return text
 
         return describe

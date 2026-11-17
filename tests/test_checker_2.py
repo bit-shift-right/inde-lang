@@ -134,16 +134,6 @@ def test_an_error_in_a_branch_points_inside_the_branch() -> None:
 
 
 @pytest.mark.parametrize(
-    ("source", "fragment"),
-    [
-        ("word t ( -> ) ? end", "`?` forms are not supported"),
-    ],
-)
-def test_what_is_still_unsupported(source: str, fragment: str) -> None:
-    assert fragment in get_failure_message(source)
-
-
-@pytest.mark.parametrize(
     ("body", "inputs", "outputs", "fragment"),
     [
         (
