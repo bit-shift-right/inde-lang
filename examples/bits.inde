@@ -1,0 +1,25 @@
+word exponent ( f32 -> u32 )
+  to-bits 23u32 shr 0xFFu32 bit-and
+end
+
+word fraction ( f32 -> u32 )
+  to-bits 0x7FFFFFu32 bit-and
+end
+
+word next-up ( f32 -> f32 )
+  to-bits 1u32 + from-bits
+end
+
+word main ( -> )
+  1.0 to-bits print
+  1.0 exponent print
+  1.5 fraction print
+
+  0.0 -0.0 == print
+  0.0 to-bits -0.0 to-bits == print
+
+  1.0 next-up 1.0 - print
+
+  0x7F800001u32 from-bits to-bits print
+  0x7F800001u32 from-bits 1.0 + to-bits print
+end

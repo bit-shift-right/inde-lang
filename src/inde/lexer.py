@@ -8,7 +8,6 @@ from inde.errors import IndeError
 
 
 class TokenType(Enum):
-    # Delimiters
     LEFT_PARENTHESIS = auto()
     RIGHT_PARENTHESIS = auto()
     LEFT_BRACKET = auto()
@@ -18,14 +17,12 @@ class TokenType(Enum):
     COMMA = auto()
     COLON = auto()
 
-    # Literals
     INTEGER = auto()
     FLOAT = auto()
     BOOLEAN = auto()
     CHARACTER = auto()
     STRING = auto()
 
-    # Words
     NAME = auto()
     KEYWORD = auto()
     SYMBOL = auto()
@@ -34,7 +31,6 @@ class TokenType(Enum):
     ROW_VARIABLE = auto()
     CONSTANT_NAME = auto()
 
-    # End of file marker
     END_OF_FILE = auto()
 
 
@@ -278,7 +274,11 @@ class NumberParser:
             )
 
         exact = Fraction(f"{integer_part}.{fractional_part or '0'}e{exponent or '0'}")
-        rounded = self.round_to_float(exact, type_suffix)
+        from inde.numeric import round_exact
+        from inde.type_model import F32, F64
+
+        float_type = F64 if type_suffix == NumberType.F64 else F32
+        rounded = round_exact(exact, float_type)
         if rounded == math.inf:
             self.fail(f"float literal overflows {type_suffix.value}")
         if rounded == 0.0 and exact != 0:
@@ -289,30 +289,6 @@ class NumberParser:
             TokenType.FLOAT,
             NumberValue(-rounded if negative else rounded, type_suffix),
         )
-
-    # Round once to F32 or F64 to avoid double rounding with builtin float()
-    def round_to_float(self, exact: Fraction, float_type: NumberType) -> float:
-        precision, emin, emax = (24, -126, 127)
-        if float_type == NumberType.F64:
-            precision, emin, emax = (53, -1022, 1023)
-
-        if exact == 0:
-            return 0.0
-
-        # Find e with 2**e <= exact < 2**(e + 1).
-        e = exact.numerator.bit_length() - exact.denominator.bit_length()
-        if exact < Fraction(2) ** e:
-            e -= 1
-        # Subnormal numbers
-        e = max(e, emin)
-        # Scale so the significand is an integer
-        q = round(exact * Fraction(2) ** (precision - 1 - e))
-        if q == 2**precision:  # Rounding carried to next power of two
-            q //= 2
-            e += 1
-        if e > emax:
-            return math.inf
-        return math.ldexp(q, e - (precision - 1))
 
     def suffix_type(self, suffix: str, default: NumberType) -> NumberType:
         if suffix == "":

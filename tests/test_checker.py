@@ -122,6 +122,42 @@ def test_unknown_word() -> None:
     assert body_fails("frobnicate") == "unknown word `frobnicate`"
 
 
+@pytest.mark.parametrize(
+    ("body", "inputs", "message"),
+    [
+        ("dup.checked", "i32", "`dup` has no `.checked` form"),
+        ("not.wrap", "bool", "`not` has no `.wrap` form"),
+        ("==.checked", "i32 i32", "`==` has no `.checked` form"),
+        ("to-bits.checked", "f32", "`to-bits` has no `.checked` form"),
+        (
+            "+.chekced",
+            "i32 i32",
+            "`+` has no `.chekced` form; did you mean `+.checked`?",
+        ),
+        (
+            "sqrt.wrap",
+            "f32",
+            (
+                "`sqrt` has no `.wrap` form; its forms are `sqrt`, `sqrt.ieee`, "
+                "`sqrt.checked`"
+            ),
+        ),
+        ("let x in x.checked end", "i32", "`x` has no `.checked` form"),
+    ],
+)
+def test_a_form_a_word_does_not_have(body: str, inputs: str, message: str) -> None:
+    assert body_fails(body, inputs) == message
+
+
+def test_a_form_of_a_word_of_the_program() -> None:
+    assert (
+        get_failure_message(
+            "word square ( i32 -> i32 ) dup * end  word t ( -> ) 1 square.checked end"
+        )
+        == "`square` has no `.checked` form"
+    )
+
+
 def test_errors_point_at_the_item() -> None:
     source = "word t ( -> )\n  1\n  nope\nend"
     assert line_of(source) == 3
@@ -243,13 +279,26 @@ def test_builtins(body: str, inputs: str, outputs: str) -> None:
         ("+", "`+` takes 2 values, but the stack is empty"),
         ("true 1 and", "`and` takes two `bool` values, found `bool i32`"),
         ("1 not", "`not` takes a `bool`, found `i32`"),
-        ("1.5 2.5 %", "`%` takes two integers of the same type"),
+        ("1.5 2.5 %.wrap", "`%.wrap` takes two integers of the same type"),
         ("1.5 2.5 +.wrap", "`+.wrap` takes two integers of the same type"),
         ("1 2 +.ieee", "`+.ieee` takes two floats of the same type"),
         ("1u8 neg", "`neg` takes a signed integer or a float, found `u8`"),
         ("1u8 3 shl", "`shl` takes an integer and a `u32` amount"),
         ("{ 1 } print", "`print` takes a value that can be displayed"),
         ("print", "`print` takes 1 value, but the stack is empty"),
+        (
+            "true 10 20u8 select",
+            (
+                "`select` takes a `bool` and two unrestricted values of the same type, "
+                "found `bool i32 u8`"
+            ),
+        ),
+        ("1 10 20 select", "found `i32 i32 i32`"),
+        ("true strbuf-new strbuf-new select", "found `bool strbuf strbuf`"),
+        (
+            "1 to-bool",
+            "there is no conversion to `bool`; use a comparison, such as `0 !=`",
+        ),
     ],
 )
 def test_builtin_errors(body: str, fragment: str) -> None:

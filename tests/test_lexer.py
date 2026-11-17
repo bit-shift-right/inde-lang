@@ -8,11 +8,11 @@ from inde.lexer import NumberType, Token, TokenType, tokenize
 
 
 def list_all_token_types(source: str) -> list[TokenType]:
-    return [token.type for token in tokenize(source)[:-1]]  # Exclude END_OF_FILE
+    return [token.type for token in tokenize(source)[:-1]]
 
 
 def list_all_token_texts(source: str) -> list[str]:
-    return [token.text for token in tokenize(source)[:-1]]  # Exclude END_OF_FILE
+    return [token.text for token in tokenize(source)[:-1]]
 
 
 def expect_single_token(source: str) -> Token:
@@ -56,7 +56,7 @@ def test_crlf_is_valid_line_break() -> None:
     ("source", "fragment"),
     [
         ("\r", "lone carriage return"),
-        ("(   )", "printable ASCII"),  # a non-breaking space is not whitespace
+        ("(   )", "printable ASCII"),
     ],
 )
 def test_invalid_whitespace(source: str, fragment: str) -> None:

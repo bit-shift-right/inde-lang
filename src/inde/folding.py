@@ -14,7 +14,7 @@ from inde.ast import (
     StringLiteral,
     WordReference,
 )
-from inde.builtins import BUILTINS, CONVERSIONS, STACK_WORDS, StackWord
+from inde.builtins import BIT_CASTS, BUILTINS, CONVERSIONS, STACK_WORDS, StackWord
 from inde.errors import IndeTrap
 from inde.lexer import Location
 from inde.type_model import INTEGER_TYPES
@@ -46,7 +46,7 @@ class CertainFailure(Exception):
 
 
 def is_foldable(name: str) -> bool:
-    if name.partition(".")[0] in CONVERSIONS:
+    if name.partition(".")[0] in CONVERSIONS or name in BIT_CASTS:
         return True
     if name not in BUILTINS or name in IMPURE:
         return False
@@ -54,7 +54,7 @@ def is_foldable(name: str) -> bool:
 
 
 def arity(name: str) -> tuple[int, int]:
-    if name.partition(".")[0] in CONVERSIONS:
+    if name.partition(".")[0] in CONVERSIONS or name in BIT_CASTS:
         return 1, 1
     effect = BUILTINS[name].effect
     return len(effect.inputs), len(effect.outputs)

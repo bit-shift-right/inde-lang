@@ -112,7 +112,13 @@ def test_conversions(line: str, types: str) -> None:
                 "a `char` converts only to `u32`"
             ),
         ),
-        ("true to-i32", "there is no conversion from `bool` to `i32`"),
+        (
+            "true to-i32",
+            (
+                "there is no conversion from `bool` to `i32`; use `select`, as in "
+                "`1 0 select`"
+            ),
+        ),
         ('"5" to-i32', "there is no conversion from `str` to `i32`"),
         (
             "1u8 to-char",

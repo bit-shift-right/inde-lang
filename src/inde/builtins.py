@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from inde.type_model import (
     BOOL,
     CHAR,
+    F32,
+    F64,
     FLOAT_TYPES,
     INTEGER_TYPES,
     NUMBER_TYPES,
@@ -12,6 +14,7 @@ from inde.type_model import (
     STRBUF,
     U8,
     U32,
+    U64,
     UNIT,
     Effect,
     Type,
@@ -101,27 +104,32 @@ SAME_NUMBERS = "two numbers of the same type"
 SAME_INTEGERS = "two integers of the same type"
 SAME_FLOATS = "two floats of the same type"
 
-for name in ("+", "-", "*", "/"):
+for name in ("+", "-", "*", "/", "%"):
     define(name, (T, T), (T,), SAME_NUMBERS, "Num")
     define(f"{name}.wrap", (T, T), (T,), SAME_INTEGERS, "Integer")
     define(f"{name}.sat", (T, T), (T,), SAME_INTEGERS, "Integer")
     define(f"{name}.ieee", (T, T), (T,), SAME_FLOATS, "Float")
     define(f"{name}.checked", (T, T), (option_of(T),), SAME_NUMBERS, "Num")
 
-define("%", (T, T), (T,), SAME_INTEGERS, "Integer")
-define("%.wrap", (T, T), (T,), SAME_INTEGERS, "Integer")
-define("%.sat", (T, T), (T,), SAME_INTEGERS, "Integer")
-define("%.checked", (T, T), (option_of(T),), SAME_INTEGERS, "Integer")
-
+SIGNED_OR_FLOAT = "a signed integer or a float"
 for name in ("neg", "abs"):
-    define(name, (T,), (T,), "a signed integer or a float", "Signed|Float")
+    define(name, (T,), (T,), SIGNED_OR_FLOAT, "Signed|Float")
     define(f"{name}.wrap", (T,), (T,), "a signed integer", "Signed")
     define(f"{name}.sat", (T,), (T,), "a signed integer", "Signed")
-    define(f"{name}.checked", (T,), (option_of(T),), "a signed integer", "Signed")
+    define(f"{name}.ieee", (T,), (T,), "a float", "Float")
+    define(f"{name}.checked", (T,), (option_of(T),), SIGNED_OR_FLOAT, "Signed|Float")
 
-define("sqrt", (T,), (T,), "a float", "Float")
-define("sqrt.ieee", (T,), (T,), "a float", "Float")
-define("sqrt.checked", (T,), (option_of(T),), "a float", "Float")
+for name in ("sqrt", "floor", "ceil", "trunc", "round"):
+    define(name, (T,), (T,), "a float", "Float")
+    define(f"{name}.ieee", (T,), (T,), "a float", "Float")
+    define(f"{name}.checked", (T,), (option_of(T),), "a float", "Float")
+define("copysign", (T, T), (T,), SAME_FLOATS, "Float")
+define("copysign.ieee", (T, T), (T,), SAME_FLOATS, "Float")
+define("copysign.checked", (T, T), (option_of(T),), SAME_FLOATS, "Float")
+THREE_FLOATS = "three floats of the same type"
+define("fma", (T, T, T), (T,), THREE_FLOATS, "Float")
+define("fma.ieee", (T, T, T), (T,), THREE_FLOATS, "Float")
+define("fma.checked", (T, T, T), (option_of(T),), THREE_FLOATS, "Float")
 
 for name in ("bit-and", "bit-or", "bit-xor"):
     define(name, (T, T), (T,), SAME_INTEGERS, "Integer")
@@ -145,6 +153,13 @@ for name in ("<", "<=", ">", ">="):
 for name in ("and", "or", "xor"):
     define(name, (BOOL, BOOL), (BOOL,), "two `bool` values")
 define("not", (BOOL,), (BOOL,), "a `bool`")
+define(
+    "select",
+    (BOOL, T, T),
+    (T,),
+    "a `bool` and two unrestricted values of the same type",
+    "Unrestricted",
+)
 
 define("print", (T,), (), "a value that can be displayed", "Display")
 define("unit", (), (UNIT,), "nothing")
@@ -292,3 +307,13 @@ def conversion_forms(source: Type, target: Type) -> tuple[str, ...]:
     if source == CHAR and target == CHAR:
         return ("", "checked")
     return ()
+
+
+BIT_CASTS: dict[str, dict[Type, Type]] = {
+    "to-bits": {F32: U32, F64: U64},
+    "from-bits": {U32: F32, U64: F64},
+}
+BIT_CAST_TAKES: dict[str, str] = {
+    "to-bits": "an `f32` or an `f64`",
+    "from-bits": "a `u32` or a `u64`",
+}

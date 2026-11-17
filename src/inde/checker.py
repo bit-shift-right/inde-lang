@@ -36,6 +36,8 @@ from inde.ast import (
     WordReference,
 )
 from inde.builtins import (
+    BIT_CAST_TAKES,
+    BIT_CASTS,
     BUILTINS,
     CONSTRAINTS,
     CONVERSIONS,
@@ -306,7 +308,12 @@ class Checker:
         )
 
     def claim_name(self, name: str, location: Location | None) -> None:
-        if name in BUILTINS or name in STACK_WORDS or name in CONVERSIONS:
+        if (
+            name in BUILTINS
+            or name in STACK_WORDS
+            or name in CONVERSIONS
+            or name in BIT_CASTS
+        ):
             self.fail(f"`{name}` is a built-in word and cannot be redefined", location)
         if name in self.words:
             earlier = self.words[name].location
@@ -1040,6 +1047,7 @@ class Checker:
             or name in BUILTINS
             or name in STACK_WORDS
             or name in CONVERSIONS
+            or name in BIT_CASTS
             or name in self.broken
         )
 
@@ -1363,6 +1371,8 @@ class Checker:
             self.apply_effect(name, self.words[name].effect, stack, call.location)
         elif name.partition(".")[0] in CONVERSIONS:
             self.check_conversion(name, stack, call.location)
+        elif name in BIT_CASTS:
+            self.check_bit_cast(name, stack, call.location)
         elif name in BUILTINS:
             builtin = BUILTINS[name]
             self.require_depth(name, builtin.arguments, stack, call.location)
@@ -1387,10 +1397,30 @@ class Checker:
                 *BUILTINS,
                 *STACK_WORDS,
                 *CONVERSIONS,
+                *BIT_CASTS,
             ]
+            if name == "to-bool":
+                self.fail(
+                    "there is no conversion to `bool`; use a comparison, such as "
+                    "`0 !=`",
+                    call.location,
+                )
+            base, dot, modifier = name.partition(".")
+            if dot and base in known:
+                self.fail(self.missing_form(base, modifier, known), call.location)
             self.fail(
                 f"unknown word `{name}`{self.suggestion(name, known)}", call.location
             )
+
+    def missing_form(self, base: str, modifier: str, known: list[str]) -> str:
+        forms = [name for name in known if name.partition(".")[0] == base]
+        message = f"`{base}` has no `.{modifier}` form"
+        if len(forms) == 1:
+            return message
+        suggestion = self.suggestion(f"{base}.{modifier}", forms)
+        if suggestion:
+            return message + suggestion
+        return message + "; its forms are " + ", ".join(f"`{form}`" for form in forms)
 
     def check_conversion(
         self, name: str, stack: TypeStack, location: Location | None
@@ -1415,6 +1445,8 @@ class Checker:
                 message += "; only a `u32` converts to a `char`"
             elif source == CHAR:
                 message += "; a `char` converts only to `u32`"
+            elif source == BOOL:
+                message += "; use `select`, as in `1 0 select`"
             elif is_type_variable(source):
                 message += (
                     f"; add `where {source}: Integer`, `where {source}: Float` or "
@@ -1431,6 +1463,24 @@ class Checker:
                 location,
             )
         stack.types[-1] = option_of(target) if modifier == "checked" else target
+
+    def check_bit_cast(
+        self, name: str, stack: TypeStack, location: Location | None
+    ) -> None:
+        self.require_depth(name, 1, stack, location)
+        source = self.inference.resolve(stack.types[-1])
+        if self.inference.has_unknowns(source):
+            self.fail(
+                f"`{name}` reinterprets the value below it, but its type is not "
+                "known at this point",
+                location,
+            )
+        pairs = BIT_CASTS[name]
+        if source not in pairs:
+            self.fail(
+                f"`{name}` takes {BIT_CAST_TAKES[name]}, found `{source}`", location
+            )
+        stack.types[-1] = pairs[source]
 
     def generic_conversion_forms(self, variable: Type, target: Type) -> tuple[str, ...]:
         assumed = self.assumptions.get(variable.name, frozenset())

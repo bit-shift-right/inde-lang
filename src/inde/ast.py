@@ -115,7 +115,6 @@ class WordReference(Node):
 
 @dataclass(frozen=True, kw_only=True)
 class Propagate(Node):
-    # Used early return nodes. No body
     pass
 
 

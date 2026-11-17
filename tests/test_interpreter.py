@@ -134,6 +134,24 @@ def test_comparison_and_booleans() -> None:
     assert printed("\"a\" \"a\" == print 'a' 'b' < print") == ["true", "true"]
 
 
+def test_select() -> None:
+    assert printed("true 10 20 select print 5 3 < 1 0 select print") == ["10", "0"]
+    assert printed('false "a" "b" select print') == ["b"]
+    assert printed(
+        'true none 5 some select match case some print case none "none" print end'
+    ) == ["none"]
+
+
+def test_select_in_generic_code() -> None:
+    declarations = "word pick ( bool T T -> T ) where T: Unrestricted select end\n"
+    assert printed(
+        "false 1.5 2.5 pick print true 'x' 'y' pick print", declarations
+    ) == [
+        "2.5",
+        "x",
+    ]
+
+
 def test_overflow_traps() -> None:
     message = get_trap_message("2147483647 1 let a b in a b + print end")
     assert message == "integer overflow in `+` (i32 2147483647, i32 1)"

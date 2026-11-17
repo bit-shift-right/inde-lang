@@ -22,7 +22,7 @@ class Color(Enum):
 def supports_color(stream: TextIO) -> bool:
     system = platform.system()
     if system == "Windows" or system == "":
-        return False  # Don't support text decoration on these platforms
+        return False
     if "NO_COLOR" in os.environ:
         return False
     return stream.isatty()

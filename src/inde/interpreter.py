@@ -27,21 +27,26 @@ from inde.ast import (
     While,
     WordReference,
 )
-from inde.builtins import BUILTINS, CONVERSIONS, STACK_WORDS, StackWord
+from inde.builtins import BIT_CASTS, BUILTINS, CONVERSIONS, STACK_WORDS, StackWord
 from inde.checker import Checker, ConstantInfo, WordInfo, error_order
 from inde.errors import IndeError, IndeErrors, IndeTrap
 from inde.lexer import Location, quote, tokenize
 from inde.numeric import (
+    FLOAT_UNARY,
     Failure,
     bit_not,
     bitwise,
     compare,
+    copy_sign,
     count_bits,
     float_arithmetic,
+    float_bits,
+    float_from_bits,
     float_to_float,
     float_to_integer,
     float_unary,
     format_float,
+    fused_multiply_add,
     integer_arithmetic,
     integer_to_float,
     integer_to_integer,
@@ -346,6 +351,8 @@ class Interpreter:
                 self.run_stack_word(STACK_WORDS[name], stack)
             elif name.partition(".")[0] in CONVERSIONS:
                 stack.append(self.convert(name, stack.pop(), item.location))
+            elif name in BIT_CASTS:
+                stack.append(self.reinterpret(name, stack.pop()))
             else:
                 self.run_builtin(name, stack, item.location)
         else:
@@ -441,18 +448,29 @@ class Interpreter:
 
         if base in ("==", "!=", "<", "<=", ">", ">="):
             return boolean(compare(base, plain(first), plain(operands[1])))
+        if base == "select":
+            return operands[1] if first.data else operands[2]
         if first.type == BOOL:
             return boolean(self.boolean_operation(base, operands))
 
         number_type = first.type
         if number_type in FLOAT_TYPES:
             assert isinstance(first.data, float)
-            if base in ("neg", "abs", "sqrt"):
+            if base in FLOAT_UNARY:
                 return Value(
                     number_type, float_unary(base, mode, number_type, first.data)
                 )
             second = operands[1].data
             assert isinstance(second, float)
+            if base == "copysign":
+                return Value(number_type, copy_sign(number_type, first.data, second))
+            if base == "fma":
+                third = operands[2].data
+                assert isinstance(third, float)
+                return Value(
+                    number_type,
+                    fused_multiply_add(mode, number_type, first.data, second, third),
+                )
             return Value(
                 number_type,
                 float_arithmetic(base, mode, number_type, first.data, second),
@@ -627,11 +645,21 @@ class Interpreter:
             ) from None
         return some(result) if checked else result
 
+    def reinterpret(self, name: str, value: Value) -> Value:
+        target = BIT_CASTS[name][value.type]
+        if name == "to-bits":
+            assert isinstance(value.data, float)
+            return Value(target, float_bits(value.data, value.type))
+        assert isinstance(value.data, int)
+        return Value(target, float_from_bits(value.data, target))
+
     def converted(self, value: Value, target: Type, mode: str) -> Value:
         source, data = value.type, value.data
+        if source == target:
+            return value
         if source == CHAR:
             assert isinstance(data, str)
-            return value if target == CHAR else Value(U32, ord(data))
+            return Value(U32, ord(data))
         if target == CHAR:
             assert isinstance(data, int)
             if 0xD800 <= data <= 0xDFFF or data > 0x10FFFF:

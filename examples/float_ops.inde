@@ -1,0 +1,27 @@
+word fraction ( f64 -> f64 )
+  dup trunc -
+end
+
+word product-error ( f64 f64 -> f64 )
+  let a b in a b a b * neg fma end
+end
+
+word lerp ( T T T -> T ) where T: Float
+  let a b t in t b a - a fma end
+end
+
+word main ( -> )
+  2.5 round print
+  3.5 round print
+  -0.5 ceil print
+  -2.75f64 fraction print
+
+  -7.5 2.0 % print
+  1.0 0.0 %.checked match case some print case none "no remainder" print end
+
+  3.0 -0.0 copysign print
+
+  0.1f64 10.0f64 * print
+  0.1f64 10.0f64 product-error print
+  0.0 10.0 0.25 lerp print
+end

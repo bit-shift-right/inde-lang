@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import math
 import struct
+from fractions import Fraction
+from typing import Self
 
 from inde.type_model import F32, SIGNED_INTEGER_TYPES, Type
 
@@ -175,13 +177,59 @@ def float_arithmetic(
         exact = a - b
     elif operation == "*":
         exact = a * b
-    else:
-        assert operation == "/", operation
+    elif operation == "/":
         exact = ieee_divide(a, b)
+    else:
+        assert operation == "%", operation
+        exact = ieee_remainder(a, b)
     return fit_float(round_to(number_type, exact), mode, (a, b))
 
 
+FLOAT_UNARY = ("neg", "abs", "sqrt", "floor", "ceil", "trunc", "round")
+
+
+def round_integral(operation: str, a: float) -> float:
+    if math.isnan(a):
+        return math.nan
+    if math.isinf(a):
+        return a
+    if operation == "floor":
+        whole = math.floor(a)
+    elif operation == "ceil":
+        whole = math.ceil(a)
+    elif operation == "trunc":
+        whole = math.trunc(a)
+    else:
+        assert operation == "round", operation
+        whole = round(a)
+    return math.copysign(float(whole), a)
+
+
+def ieee_remainder(a: float, b: float) -> float:
+    if math.isnan(a) or math.isnan(b) or math.isinf(a) or b == 0.0:
+        return math.nan
+    if math.isinf(b):
+        return a
+    return math.fmod(a, b)
+
+
+def sign_bit(value: float, number_type: Type) -> bool:
+    if isinstance(value, NaNBits):
+        return bool(value.bits >> (bits_of(number_type) - 1))
+    return math.copysign(1.0, value) < 0
+
+
+def copy_sign(number_type: Type, a: float, b: float) -> float:
+    if math.isnan(a):
+        return math.nan
+    return -math.fabs(a) if sign_bit(b, number_type) else math.fabs(a)
+
+
 def float_unary(operation: str, mode: str, number_type: Type, a: float) -> float:
+    if operation in ("floor", "ceil", "trunc", "round"):
+        return round_integral(operation, a)
+    if math.isnan(a) and operation in ("neg", "abs"):
+        return math.nan
     if operation == "neg":
         return -a
     if operation == "abs":
@@ -282,7 +330,76 @@ def float_to_integer(value: float, mode: str, target: Type) -> int:
 
 
 def float_to_float(value: float, mode: str, target: Type) -> float:
+    if math.isnan(value):
+        return math.nan
     result = round_to(target, value)
     if math.isinf(result) and not math.isinf(value) and mode != "ieee":
         raise Failure("float overflow")
     return result
+
+
+class NaNBits(float):
+    bits: int
+
+    def __new__(cls, bits: int) -> Self:
+        nan = super().__new__(cls, math.nan)
+        nan.bits = bits
+        return nan
+
+
+def float_bits(value: float, number_type: Type) -> int:
+    if isinstance(value, NaNBits):
+        return value.bits
+    if number_type == F32:
+        return int(struct.unpack("<I", struct.pack("<f", value))[0])
+    return int(struct.unpack("<Q", struct.pack("<d", value))[0])
+
+
+def float_from_bits(bits: int, number_type: Type) -> float:
+    if number_type == F32:
+        value = float(struct.unpack("<f", struct.pack("<I", bits))[0])
+    else:
+        value = float(struct.unpack("<d", struct.pack("<Q", bits))[0])
+    return NaNBits(bits) if math.isnan(value) else value
+
+
+def round_exact(exact: Fraction, number_type: Type) -> float:
+    if exact < 0:
+        return -round_exact(-exact, number_type)
+    if exact == 0:
+        return 0.0
+    precision, emin, emax = (24, -126, 127) if number_type == F32 else (53, -1022, 1023)
+    e = exact.numerator.bit_length() - exact.denominator.bit_length()
+    if exact < Fraction(2) ** e:
+        e -= 1
+    e = max(e, emin)
+    q = round(exact * Fraction(2) ** (precision - 1 - e))
+    if q == 2**precision:
+        q //= 2
+        e += 1
+    if e > emax:
+        return math.inf
+    return math.ldexp(q, e - (precision - 1))
+
+
+def fused_multiply_add(
+    mode: str, number_type: Type, a: float, b: float, c: float
+) -> float:
+    operands = (a, b, c)
+    if not (math.isfinite(a) and math.isfinite(b)):
+        result = a * b + c
+    elif not math.isfinite(c):
+        result = c
+    else:
+        exact = Fraction(a) * Fraction(b) + Fraction(c)
+        if exact != 0:
+            result = round_exact(exact, number_type)
+        elif (a == 0.0 or b == 0.0) and c == 0.0:
+            product_negative = (math.copysign(1.0, a) < 0) != (
+                math.copysign(1.0, b) < 0
+            )
+            negative = product_negative and math.copysign(1.0, c) < 0
+            result = -0.0 if negative else 0.0
+        else:
+            result = 0.0
+    return fit_float(result, mode, operands)
