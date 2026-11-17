@@ -1,21 +1,28 @@
-type Shape = circle( f32 ) | rect( f32 f32 )
+const PI = 3.141592653
 
-const PI = 3.14159
+type Shape = circle( f32 ) | rect( f32 f32 ) | tri( f32 f32 )
 
-word square ( f32 -> f32 )
-  dup *
-end
+word area(Shape -> f32)
+  match
+    case circle
+      let radius in
+        radius dup * PI *
+      end
 
-word circle-area ( f32 -> f32 )
-  square PI *
+    case rect
+      let width height in
+        width height *
+      end
+
+    case tri
+      let base height in
+        2.0 base / height *
+      end
+  end
 end
 
 word main ( -> )
-  2.0 circle-area print
-  1 2 + 3 * print
-  0.1 0.2 + print
-  0.1f64 0.2f64 + print
-  200u8 100u8 +.sat print
-  -7 2 / print
-  "done" print
+  2.0 circle area print
+  2.0 4.0 rect area print
+  2.0 4.0 tri area print
 end

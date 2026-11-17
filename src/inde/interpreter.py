@@ -386,7 +386,7 @@ class Session:
 
     def run_line(self, line: str) -> None:
         try:
-            parsed = Parser(tokenize(line)).parse_repl_line()
+            parsed = Parser(tokenize(line), self.known_types()).parse_repl_line()
         except IndeError as error:
             raise IndeErrors([error]) from None
         if isinstance(parsed, tuple):
@@ -394,9 +394,13 @@ class Session:
         else:
             self.declare(Program(declarations=(parsed,)))
 
+    def known_types(self) -> dict[str, int]:
+        # The types declared on earlier lines, with their parameter counts
+        return {name: info.parameters for name, info in self.checker.types.items()}
+
     def is_incomplete(self, text: str) -> bool:
         try:
-            Parser(tokenize(text)).parse_repl_line()
+            Parser(tokenize(text), self.known_types()).parse_repl_line()
         except IndeError as error:
             if error.message == "unterminated block comment":
                 return True

@@ -747,3 +747,86 @@ def test_a_local_whose_type_arrives_later() -> None:
     assert "linear locals are not supported" in body_fails(
         "none let x in x end", "", "Option[Handle]", HANDLE
     )
+
+
+BAG = "type Bag[T] = bag( array[T] ) | empty\n"
+
+
+def test_a_type_may_hold_an_array_of_its_parameter() -> None:
+    source = BAG + "type Box[T] = box( Bag[T] i32 )\n"
+    assert effect_of(source, "bag") == "( array[T] -> Bag[T] ) where T: Unrestricted"
+    assert effect_of(source, "empty") == "( -> Bag[T] ) where T: Unrestricted"
+    assert effect_of(source, "box") == (
+        "( Bag[T] i32 -> Box[T] ) where T: Unrestricted"
+    )
+    assert effect_of(source, "box-unpack") == (
+        "( Box[T] -> Bag[T] i32 ) where T: Unrestricted"
+    )
+    accepts("{ 1 2 } bag", "", "Bag[i32]", source)
+    accepts("empty 0 box", "", "Box[str]", source)
+    accepts("match case bag drop case empty end", "Bag[str]", "", source)
+
+
+def test_a_type_holding_arrays_still_takes_any_other_parameter() -> None:
+    source = HANDLE + "type Tagged[T, U] = tagged( array[T] U )\n"
+    assert effect_of(source, "tagged") == (
+        "( array[T] U -> Tagged[T, U] ) where T: Unrestricted"
+    )
+    accepts("{ 1 } swap tagged", "Handle", "Tagged[i32, Handle]", source)
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        (
+            BAG + "word t ( Bag[strbuf] -> Bag[strbuf] ) end",
+            (
+                "`Bag` holds an `array` of its `T`, which must be unrestricted, "
+                "but `strbuf` is linear (in `t`)"
+            ),
+        ),
+        (
+            BAG + "word t ( Option[Bag[T]] -> Option[Bag[T]] ) end",
+            (
+                "`Bag` holds an `array` of its `T`, which must be unrestricted, "
+                "but `T` may be linear; add `where T: Unrestricted` (in `t`)"
+            ),
+        ),
+        (
+            BAG + HANDLE + "type Box[T] = box( Bag[T] )\n"
+            "word t ( Box[Handle] -> Box[Handle] ) end",
+            (
+                "`Box` holds an `array` of its `T`, which must be unrestricted, "
+                "but `Handle` is linear (in `t`)"
+            ),
+        ),
+        (
+            BAG + HANDLE + "type Holder = holder( Bag[Handle] )",
+            (
+                "`Bag` holds an `array` of its `T`, which must be unrestricted, "
+                "but `Handle` is linear (in `holder`)"
+            ),
+        ),
+        (
+            BAG + HANDLE + "word t ( -> Bag[Handle] ) empty end",
+            (
+                "`Handle` does not satisfy `Unrestricted`, which `empty` requires of "
+                "its `T`"
+            ),
+        ),
+    ],
+)
+def test_a_linear_type_cannot_fill_an_array_parameter(
+    source: str, message: str
+) -> None:
+    assert message in get_failure_messages(source)
+
+
+def test_a_generic_word_over_such_a_type() -> None:
+    source = BAG + (
+        "word size ( Bag[T] -> i32 ) where T: Unrestricted\n"
+        "  match case bag drop 1 case empty 0 end\n"
+        "end\n"
+        "word t ( -> i32 ) { 1 2 } bag size end\n"
+    )
+    check(parse(source))

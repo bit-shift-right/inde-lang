@@ -122,11 +122,15 @@ LITERAL_TYPES: tuple[TokenType, ...] = (
 
 
 class Parser:
-    def __init__(self, tokens: list[Token]) -> None:
+    def __init__(
+        self, tokens: list[Token], known_types: dict[str, int] | None = None
+    ) -> None:
+        # `known_types` gives the number of parameters of types declared
+        # before these tokens, such as on an earlier line of a REPL
         self.tokens = tokens
         self.position = 0
         self.errors: list[IndeError] = []
-        self.arguments = collect_type_arguments(tokens)
+        self.arguments = {**(known_types or {}), **collect_type_arguments(tokens)}
         self.location = Location(0, 0, 0)
 
     def peek(self, ahead: int = 0) -> Token:

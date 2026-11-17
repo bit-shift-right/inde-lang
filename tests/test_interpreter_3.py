@@ -207,3 +207,33 @@ def test_the_repl_needs_every_type() -> None:
     assert session.show_stack() == "stack: 1"
     session.run_line("none 5 some ==")
     assert session.show_stack() == "stack: 1 | false"
+
+
+def test_a_type_holding_an_array_of_its_parameter() -> None:
+    declarations = (
+        "type Bag[T] = bag( array[T] ) | empty\n"
+        "word count ( Bag[T] -> i32 ) where T: Unrestricted\n"
+        "  match case bag drop 1 case empty 0 end\n"
+        "end\n"
+        "word nothing ( -> Bag[str] ) empty end\n"
+    )
+    assert printed('{ "a" } bag count print nothing count print', declarations) == [
+        "1",
+        "0",
+    ]
+    session = session_after("type Bag[T] = bag( array[T] ) | empty", "{ 1 2 } bag")
+    assert session.show_stack() == "stack: { 1 2 } bag"
+
+
+def test_repl_types_with_parameters_from_earlier_lines() -> None:
+    session = session_after(
+        "type Box[T] = box( T )",
+        "type Crate[T] = crate( Box[T] Box[T] )",
+        "word open ( Box[T] -> T ) box-unpack end",
+        "1 box 2 box crate crate-unpack open swap open +",
+    )
+    assert session.show_stack() == "stack: 3"
+    assert not session.is_incomplete("word w ( Box[i32] -> i32 ) open end")
+    with pytest.raises(IndeErrors) as failure:
+        session.run_line("word w ( Box -> ) drop end")
+    assert "`Box` takes 1 type argument" in failure.value.errors[0].message

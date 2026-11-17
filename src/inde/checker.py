@@ -63,6 +63,7 @@ from inde.type_model import (
     is_type_variable,
     is_unknown,
     substitute,
+    variables_of,
 )
 
 
@@ -129,6 +130,8 @@ class Checker:
         self.linear_types: set[str] = set()
         self.field_types: dict[str, list[Type]] = {}
         self.variants: dict[str, tuple[str, ...]] = {}
+        self.type_parameters: dict[str, tuple[str, ...]] = {}
+        self.unrestricted_parameters: dict[str, frozenset[int]] = {}
         self.local_names: dict[str, str] = {}
         self.current_word: str | None = None
         self.broken: set[str] = set()
@@ -188,6 +191,7 @@ class Checker:
                 self.declare_word(word_declaration)
 
         self.derive_linear_types()
+        self.derive_unrestricted_parameters()
 
         for word in list(self.words.values()):
             with self.recover():
@@ -220,6 +224,7 @@ class Checker:
                     declaration.location,
                 )
         self.types[name] = TypeInfo(name, len(declaration.params), declaration.location)
+        self.type_parameters[name] = declaration.params
         if declaration.linear:
             self.linear_types.add(name)
 
@@ -392,6 +397,50 @@ class Checker:
             or any(self.always_linear(arg) for arg in checked_type.args)
         )
 
+    def derive_unrestricted_parameters(self) -> None:
+        required: dict[str, set[int]] = {"array": {0}}
+        changed = True
+        while changed:
+            changed = False
+            for name, fields in self.field_types.items():
+                parameters = self.type_parameters.get(name, ())
+                for field in fields:
+                    for variable in self.variables_held_in_arrays(field, required):
+                        position = parameters.index(variable)
+                        if position not in required.setdefault(name, set()):
+                            required[name].add(position)
+                            changed = True
+        self.unrestricted_parameters = {
+            name: frozenset(positions) for name, positions in required.items()
+        }
+
+        for word in list(self.words.values()):
+            if word.kind == "word":
+                continue
+            declared = (
+                word.effect.outputs[0]
+                if word.kind == "constructor"
+                else word.effect.inputs[0]
+            )
+            positions = self.unrestricted_parameters.get(declared.name, frozenset())
+            where = tuple(
+                (declared.args[position].name, "Unrestricted")
+                for position in sorted(positions)
+            )
+            self.words[word.name] = replace(
+                word, effect=replace(word.effect, where=where)
+            )
+
+    def variables_held_in_arrays(
+        self, checked_type: Type, required: dict[str, set[int]]
+    ) -> list[str]:
+        found: list[str] = []
+        for position, arg in enumerate(checked_type.args):
+            if position in required.get(checked_type.name, ()):
+                found.extend(variables_of(arg))
+            found.extend(self.variables_held_in_arrays(arg, required))
+        return found
+
     def check_array_elements(self, word: WordInfo) -> None:
         if word.kind == "unpack":
             return
@@ -400,18 +449,25 @@ class Checker:
             self.require_unrestricted_elements(checked_type, word)
 
     def require_unrestricted_elements(self, checked_type: Type, word: WordInfo) -> None:
-        if checked_type.name == "array" and self.is_linear(checked_type.args[0]):
-            element = checked_type.args[0]
+        positions = self.unrestricted_parameters.get(checked_type.name, frozenset())
+        for position in sorted(positions):
+            element = checked_type.args[position]
+            if not self.is_linear(element):
+                continue
             reason = (
                 f"`{element}` may be linear; add `where {element}: Unrestricted`"
                 if is_type_variable(element)
                 else f"`{element}` is linear"
             )
-            self.fail(
-                f"the elements of an `array` must be unrestricted, but "
-                f"{reason} (in `{word.name}`)",
-                word.location,
-            )
+            if checked_type.name == "array":
+                rule = "the elements of an `array` must be unrestricted"
+            else:
+                parameter = self.type_parameters[checked_type.name][position]
+                rule = (
+                    f"`{checked_type.name}` holds an `array` of its `{parameter}`, "
+                    "which must be unrestricted"
+                )
+            self.fail(f"{rule}, but {reason} (in `{word.name}`)", word.location)
         for arg in checked_type.args:
             self.require_unrestricted_elements(arg, word)
 
