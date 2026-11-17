@@ -1,0 +1,24 @@
+type Shape = circle( f32 ) | rect( f32 f32 )
+
+word area ( Shape -> f32 )
+  match
+    case circle dup * 3.14159 *
+    case rect *
+  end
+end
+
+word larger ( T T -> T ) where T: PartialOrd & Unrestricted
+  over over < if swap end drop
+end
+
+word count ( i32 i32 -> i32 )
+  let total n in
+    n 0 == if total else total n + n 1 - count end
+  end
+end
+
+word main ( -> )
+  2.0 circle area 3.0 4.0 rect area larger print
+  3 7 larger print
+  0 100 count print
+end

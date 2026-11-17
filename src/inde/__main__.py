@@ -4,16 +4,24 @@ from pathlib import Path
 from inde import checker, logger, parser
 from inde.errors import IndeErrors, IndeTrap
 from inde.interpreter import Interpreter
+from inde.ir import format_module
+from inde.lowering import lower
 from inde.repl import run_repl
 
 TRAP_STATUS = 2
 
 
-def run_file(source_name: str) -> int:
+def read_source(source_name: str) -> str | None:
     try:
-        source = Path(source_name).read_text(encoding="utf-8")
+        return Path(source_name).read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as error:
         print(f"{source_name}: cannot read file: {error}", file=sys.stderr)
+        return None
+
+
+def run_file(source_name: str) -> int:
+    source = read_source(source_name)
+    if source is None:
         return 1
 
     try:
@@ -32,9 +40,34 @@ def run_file(source_name: str) -> int:
         return TRAP_STATUS
 
 
+def show_ir(source_name: str, debug: bool) -> int:
+    source = read_source(source_name)
+    if source is None:
+        return 1
+    try:
+        module = lower(parser.parse(source))
+    except IndeErrors as failure:
+        logger.report_errors(source_name, failure.errors)
+        return 1
+    print(format_module(module, debug=debug), end="")
+    return 0
+
+
+USAGE = "usage: python -m inde [--ir | --ir-debug] [file]"
+
+
 def main() -> int:
-    if len(sys.argv) > 1:
-        return run_file(sys.argv[1])
+    arguments = sys.argv[1:]
+    if arguments and arguments[0] in ("--ir", "--ir-debug"):
+        if len(arguments) != 2:
+            print(USAGE, file=sys.stderr)
+            return 1
+        return show_ir(arguments[1], debug=arguments[0] == "--ir-debug")
+    if len(arguments) > 1 or (arguments and arguments[0].startswith("--")):
+        print(USAGE, file=sys.stderr)
+        return 1
+    if arguments:
+        return run_file(arguments[0])
     run_repl()
     return 0
 

@@ -1,0 +1,3 @@
+word main ( -> )
+  "Hello, World" print
+end
