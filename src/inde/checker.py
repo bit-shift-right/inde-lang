@@ -1528,6 +1528,8 @@ class Checker:
                 text += self.explain_no_equality(resolved)
             elif constraint in ("Ord", "PartialOrd"):
                 text += f"; `{resolved}` has no order"
+            elif resolved == LINEAR:
+                text += "; a linear quotation can be called only once"
             return text
 
         return describe

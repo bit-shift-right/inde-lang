@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import copy
 import sys
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import TextIO
+from typing import NoReturn, TextIO
 
 from inde.ast import (
     ArrayLiteral,
@@ -51,7 +52,9 @@ from inde.type_model import (
     U32,
     UNIT,
     Type,
+    array_of,
     from_number_type,
+    result_of,
 )
 from inde.values import (
     Data,
@@ -67,6 +70,7 @@ from inde.values import (
 )
 
 MAX_CALL_DEPTH = 100_000
+MAX_LENGTH = 2**32 - 1
 
 
 UNIT_VALUE = Value(UNIT, Data("unit"))
@@ -98,6 +102,9 @@ def inspect(value: Value, nested: bool = False) -> str:
     data = value.data
     if isinstance(data, Quoted):
         return "[ ... ]" if nested else str(value.type)
+    if isinstance(data, list):
+        elements = " ".join(["{", *(inspect(element, True) for element in data), "}"])
+        return f"{elements} arraybuf-from-array"
     if isinstance(data, Data):
         parts = [inspect(field, True) for field in data.fields] + [data.constructor]
         return " ".join(parts)
@@ -119,6 +126,12 @@ def describe_operands(operands: list[Value]) -> str:
 
 
 @dataclass
+class Each:
+    elements: Iterator[Value]
+    parts: tuple[Body | Value, ...]
+
+
+@dataclass
 class Frame:
     body: Body
     locals: dict[str, Value]
@@ -128,6 +141,7 @@ class Frame:
     in_condition: bool = False
     push: Value | None = None
     base: int = 0
+    each: Each | None = None
 
     def finished(self) -> bool:
         return self.position == len(self.body)
@@ -152,6 +166,10 @@ class Interpreter:
         while frames:
             frame = frames[-1]
             if frame.finished():
+                if frame.each is not None and self.next_element(
+                    frame.each, frames, stack
+                ):
+                    continue
                 frames.pop()
                 if frame.is_call:
                     calls -= 1
@@ -196,6 +214,18 @@ class Interpreter:
                     calls -= 1
                 continue
 
+            if isinstance(item, WordReference) and item.name == "arraybuf-consume":
+                quotation = stack.pop().data
+                buffer = stack.pop().data
+                assert isinstance(quotation, Quoted) and isinstance(buffer, list)
+                if calls >= MAX_CALL_DEPTH:
+                    raise IndeTrap("call depth exceeded", item.location)
+                each = Each(iter(tuple(buffer)), quotation.parts)
+                frames.append(Frame((), {}, is_call=True, base=len(stack), each=each))
+                calls += 1
+                self.deepest = max(self.deepest, calls)
+                continue
+
             if isinstance(item, WordReference) and item.name == "call":
                 data = stack.pop().data
                 assert isinstance(data, Quoted)
@@ -215,6 +245,7 @@ class Interpreter:
                 and frames[-1].finished()
                 and frames[-1].loop is None
                 and frames[-1].push is None
+                and frames[-1].each is None
             ):
                 if frames.pop().is_call:
                     calls -= 1
@@ -228,6 +259,18 @@ class Interpreter:
                     frames.append(Frame(part, {}))
             calls += 1
             self.deepest = max(self.deepest, calls)
+
+    def next_element(self, each: Each, frames: list[Frame], stack: list[Value]) -> bool:
+        element = next(each.elements, None)
+        if element is None:
+            return False
+        stack.append(element)
+        for part in reversed(each.parts):
+            if isinstance(part, Value):
+                frames.append(Frame((), {}, push=part))
+            else:
+                frames.append(Frame(part, {}))
+        return True
 
     def propagate(self, value: Value, stack: list[Value], frames: list[Frame]) -> bool:
         data = value.data
@@ -353,8 +396,14 @@ class Interpreter:
         if base.startswith("strbuf-"):
             stack.extend(self.strbuf_operation(base, operands))
             return
-
         checked = modifier == "checked"
+        if base.startswith("arraybuf-"):
+            stack.extend(self.buffer_operation(base, checked, operands, name, location))
+            return
+        if base.startswith("array-"):
+            stack.extend(self.array_operation(base, checked, operands, name, location))
+            return
+
         try:
             result = self.compute(base, "" if checked else modifier, operands)
         except Failure as failure:
@@ -421,6 +470,89 @@ class Interpreter:
         assert isinstance(first.data, Quoted)
         return quoted(first.data.parts + second.data.parts)
 
+    def array_operation(
+        self,
+        base: str,
+        checked: bool,
+        operands: list[Value],
+        name: str,
+        location: Location | None,
+    ) -> list[Value]:
+        elements = operands[0].data
+        assert isinstance(elements, tuple)
+        element_type = operands[0].type.args[0]
+        if base == "array-len":
+            return [Value(U32, len(elements))]
+        start = operands[1].data
+        assert isinstance(start, int)
+        if base == "array-get":
+            if start < len(elements):
+                found = elements[start]
+                return [some(found) if checked else found]
+            if checked:
+                return [none(element_type)]
+            index_trap(name, f"index {start}, length {len(elements)}", location)
+        assert base == "array-slice", base
+        end = operands[2].data
+        assert isinstance(end, int)
+        if start <= end <= len(elements):
+            part = array(element_type, elements[start:end])
+            return [some(part) if checked else part]
+        if checked:
+            return [none(array_of(element_type))]
+        index_trap(name, f"start {start}, end {end}, length {len(elements)}", location)
+
+    def buffer_operation(
+        self,
+        base: str,
+        checked: bool,
+        operands: list[Value],
+        name: str,
+        location: Location | None,
+    ) -> list[Value]:
+        if base == "arraybuf-new":
+            return [Value(Type("arraybuf", (Type("T"),)), [])]
+        first = operands[0]
+        element_type = first.type.args[0]
+        if base == "arraybuf-from-array":
+            elements = first.data
+            assert isinstance(elements, tuple)
+            return [Value(Type("arraybuf", (element_type,)), list(elements))]
+        buffer = first.data
+        assert isinstance(buffer, list)
+        if base == "arraybuf-push":
+            if len(buffer) == MAX_LENGTH:
+                raise IndeTrap(f"the buffer is full in `{name}`", location)
+            buffer.append(operands[1])
+            return [first]
+        if base == "arraybuf-pop":
+            return [first, some(buffer.pop()) if buffer else none(element_type)]
+        if base == "arraybuf-len":
+            return [first, Value(U32, len(buffer))]
+        if base == "arraybuf-snapshot":
+            return [first, array(element_type, tuple(buffer))]
+        if base == "arraybuf-freeze":
+            return [array(element_type, tuple(buffer))]
+        index = operands[1].data
+        assert isinstance(index, int)
+        in_range = index < len(buffer)
+        if base == "arraybuf-get":
+            if in_range:
+                return [first, some(buffer[index]) if checked else buffer[index]]
+            if checked:
+                return [first, none(element_type)]
+            index_trap(name, f"index {index}, length {len(buffer)}", location)
+        assert base == "arraybuf-replace", base
+        new = operands[2]
+        result = result_of(element_type, element_type)
+        if in_range:
+            old = buffer[index]
+            buffer[index] = new
+            return [first, Value(result, Data("ok", (old,))) if checked else old]
+        if checked:
+            return [first, Value(result, Data("err", (new,)))]
+        index_trap(name, f"index {index}, length {len(buffer)}", location)
+
     def strbuf_operation(self, base: str, operands: list[Value]) -> list[Value]:
         if base == "strbuf-new":
             return [Value(STRBUF, "")]
@@ -464,6 +596,23 @@ class Interpreter:
             return 0
         print(display(result.fields[0]), file=error_output or sys.stderr)
         return 1
+
+
+def index_trap(name: str, details: str, location: Location | None) -> NoReturn:
+    raise IndeTrap(f"index out of range in `{name}` ({details})", location)
+
+
+def detached(value: Value) -> Value:
+    data = value.data
+    if isinstance(data, list):
+        return Value(value.type, [detached(element) for element in data])
+    if isinstance(data, Data):
+        fields = tuple(detached(field) for field in data.fields)
+        return Value(value.type, Data(data.constructor, fields))
+    if isinstance(data, Quoted):
+        parts = tuple(detached(p) if isinstance(p, Value) else p for p in data.parts)
+        return Value(value.type, Quoted(parts))
+    return value
 
 
 class Session:
@@ -522,7 +671,7 @@ class Session:
             self.checker.errors.clear()
             raise IndeErrors(errors)
 
-        stack = list(self.stack)
+        stack = [detached(value) for value in self.stack]
         self.interpreter.execute(body, stack)
         self.stack = [
             Value(checked_type, value.data)

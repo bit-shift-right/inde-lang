@@ -125,8 +125,6 @@ class Parser:
     def __init__(
         self, tokens: list[Token], known_types: dict[str, int] | None = None
     ) -> None:
-        # `known_types` gives the number of parameters of types declared
-        # before these tokens, such as on an earlier line of a REPL
         self.tokens = tokens
         self.position = 0
         self.errors: list[IndeError] = []
