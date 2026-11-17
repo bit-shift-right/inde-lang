@@ -130,7 +130,10 @@ def test_errors_point_at_the_item() -> None:
 @pytest.mark.parametrize(
     ("source", "fragment"),
     [
+        ("word t ( -> ) [ 1 ] end", "quotations are not supported"),
         ("word t ( -> ) ? end", "`?` forms are not supported"),
+        ("word t ( [ -> ] -> ) end", "quotation types are not supported"),
+        ("word t ( ..a -> ..b ) end", "two different row variables"),
     ],
 )
 def test_later_slices_are_reported_as_unsupported(source: str, fragment: str) -> None:
@@ -173,7 +176,7 @@ def test_check_body_continues_from_a_given_stack() -> None:
     for line in ("one one", "2"):
         body = Parser(tokenize(line)).parse_repl_line()
         assert isinstance(body, tuple)
-        checker.check_line(body, stack)
+        checker.check_body(body, stack)
     assert stack == [I32, I32, I32]
 
 

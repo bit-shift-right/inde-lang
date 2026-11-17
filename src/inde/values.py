@@ -2,17 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from inde.ast import Body
-from inde.type_model import (
-    BOOL,
-    CHAR,
-    STR,
-    Effect,
-    Type,
-    array_of,
-    option_of,
-    quotation_of,
-)
+from inde.type_model import BOOL, CHAR, STR, Type, array_of, option_of
 
 
 @dataclass(frozen=True)
@@ -21,12 +11,7 @@ class Data:
     fields: tuple[Value, ...] = ()
 
 
-@dataclass(frozen=True)
-class Quoted:
-    parts: tuple[Body | Value, ...] = ()
-
-
-Payload = int | float | bool | str | tuple["Value", ...] | Data | Quoted
+Payload = int | float | bool | str | tuple["Value", ...] | Data
 
 
 @dataclass(frozen=True)
@@ -57,10 +42,3 @@ def some(value: Value) -> Value:
 
 def none(value_type: Type) -> Value:
     return Value(option_of(value_type), Data("none"))
-
-
-QUOTED = quotation_of(Effect())
-
-
-def quoted(parts: tuple[Body | Value, ...]) -> Value:
-    return Value(QUOTED, Quoted(parts))

@@ -20,7 +20,6 @@ from inde.ast import (
     Literal,
     Match,
     Program,
-    Quotation,
     StringLiteral,
     While,
     WordReference,
@@ -46,13 +45,11 @@ from inde.parser import Parser
 from inde.type_model import BOOL, FLOAT_TYPES, U32, UNIT, Type, from_number_type
 from inde.values import (
     Data,
-    Quoted,
     Value,
     array,
     boolean,
     character,
     none,
-    quoted,
     some,
     string,
 )
@@ -85,15 +82,13 @@ def display(value: Value) -> str:
     raise AssertionError(f"`{value.type}` has no display text")
 
 
-def inspect(value: Value, nested: bool = False) -> str:
+def inspect(value: Value) -> str:
     data = value.data
-    if isinstance(data, Quoted):
-        return "[ ... ]" if nested else str(value.type)
     if isinstance(data, Data):
-        parts = [inspect(field, True) for field in data.fields] + [data.constructor]
+        parts = [inspect(field) for field in data.fields] + [data.constructor]
         return " ".join(parts)
     if isinstance(data, tuple):
-        return " ".join(["{", *(inspect(element, True) for element in data), "}"])
+        return " ".join(["{", *(inspect(element) for element in data), "}"])
     if isinstance(data, bool):
         return display(value)
     if isinstance(data, str):
@@ -114,7 +109,6 @@ class Frame:
     is_call: bool = False
     loop: While | None = None
     in_condition: bool = False
-    push: Value | None = None
 
     def finished(self) -> bool:
         return self.position == len(self.body)
@@ -142,8 +136,6 @@ class Interpreter:
                 frames.pop()
                 if frame.is_call:
                     calls -= 1
-                if frame.push is not None:
-                    stack.append(frame.push)
                 if frame.loop is not None:
                     self.continue_loop(frame, frames, stack)
                 continue
@@ -175,37 +167,17 @@ class Interpreter:
                 stack.append(frame.locals[item.name])
                 continue
 
-            if isinstance(item, Quotation):
-                stack.append(quoted((item.body,) if item.body else ()))
+            callee = self.declared_body(item)
+            if callee is None:
+                self.run_item(item, stack)
                 continue
 
-            if isinstance(item, WordReference) and item.name == "call":
-                data = stack.pop().data
-                assert isinstance(data, Quoted)
-                callee = data.parts
-            else:
-                declared = self.declared_body(item)
-                if declared is None:
-                    self.run_item(item, stack)
-                    continue
-                callee = (declared,)
-
-            while (
-                frames
-                and frames[-1].finished()
-                and frames[-1].loop is None
-                and frames[-1].push is None
-            ):
+            while frames and frames[-1].finished() and frames[-1].loop is None:
                 if frames.pop().is_call:
                     calls -= 1
             if calls >= MAX_CALL_DEPTH:
                 raise IndeTrap("call depth exceeded", item.location)
-            frames.append(Frame((), {}, is_call=True))
-            for part in reversed(callee):
-                if isinstance(part, Value):
-                    frames.append(Frame((), {}, push=part))
-                else:
-                    frames.append(Frame(part, {}))
+            frames.append(Frame(callee, {}, is_call=True))
             calls += 1
             self.deepest = max(self.deepest, calls)
 
@@ -335,8 +307,6 @@ class Interpreter:
     def compute(self, base: str, mode: str, operands: list[Value]) -> Value | None:
         if base == "unit":
             return UNIT_VALUE
-        if base in ("curry", "compose"):
-            return self.quotation_operation(base, operands)
         first = operands[0]
         if base == "print":
             print(display(first), file=self.output)
@@ -376,14 +346,6 @@ class Interpreter:
         if base in ("bit-and", "bit-or", "bit-xor"):
             return Value(number_type, bitwise(base, number_type, a, b))
         return Value(number_type, integer_arithmetic(base, mode, number_type, a, b))
-
-    def quotation_operation(self, base: str, operands: list[Value]) -> Value:
-        first, second = operands
-        assert isinstance(second.data, Quoted)
-        if base == "curry":
-            return quoted((first, *second.data.parts))
-        assert isinstance(first.data, Quoted)
-        return quoted(first.data.parts + second.data.parts)
 
     def boolean_operation(self, base: str, operands: list[Value]) -> bool:
         a = operands[0].data
@@ -433,6 +395,7 @@ class Session:
             self.declare(Program(declarations=(parsed,)))
 
     def known_types(self) -> dict[str, int]:
+        # The types declared on earlier lines, with their parameter counts
         return {name: info.parameters for name, info in self.checker.types.items()}
 
     def is_incomplete(self, text: str) -> bool:
