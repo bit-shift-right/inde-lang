@@ -136,7 +136,6 @@ def test_an_error_in_a_branch_points_inside_the_branch() -> None:
 @pytest.mark.parametrize(
     ("source", "fragment"),
     [
-        ("word t ( -> ) [ 1 ] end", "quotations are not supported"),
         ("word t ( -> ) ? end", "`?` forms are not supported"),
     ],
 )

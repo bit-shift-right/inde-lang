@@ -77,15 +77,6 @@ def test_an_empty_array_takes_its_type_from_the_signature() -> None:
     accepts("{ { } { 1 } }", outputs="array[array[i32]]")
 
 
-def test_what_is_still_unsupported() -> None:
-    assert "quotation types are not supported" in get_failure_message(
-        "word t ( [ -> ] -> ) end"
-    )
-    assert "two different row variables" in get_failure_message(
-        "word t ( ..a -> ..b ) end"
-    )
-
-
 @pytest.mark.parametrize(
     ("source", "fragment"),
     [
@@ -198,10 +189,6 @@ def test_a_generic_word_may_call_itself() -> None:
         (
             "word t ( T -> T ) where T: Displya end",
             "unknown constraint `Displya`; did you mean `Display`?",
-        ),
-        (
-            "word t ( T -> T ) where T: [ -> ] end",
-            "quotation constraints are not supported",
         ),
     ],
 )

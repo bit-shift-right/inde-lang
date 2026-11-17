@@ -1,0 +1,56 @@
+; Slice 4: quotations. Run with:  python -m inde examples/quotations.inde
+
+; The usual combinators, built from `call`, `curry` and `compose`
+; (section 15.3)
+
+; Run a quotation underneath the top value
+word dip ( ..a T Q -> ..b T ) where Q: [ ..a -> ..b ]
+  swap [ ] curry compose call
+end
+
+; Run a quotation on a value, and keep a copy of the value
+word keep ( ..a T Q -> ..b T ) where Q: [ ..a T -> ..b ], T: Unrestricted
+  over [ call ] dip
+end
+
+; Run two quotations on the same value
+word bi ( T Q1 Q2 -> U V )
+  where T: Unrestricted, Q1: [ T -> U ], Q2: [ T -> V ]
+  [ keep ] dip call
+end
+
+; Run a quotation a number of times. It runs more than once, so it must
+; be unrestricted
+word times ( ..a Q i32 -> ..a ) where Q: [ ..a -> ..a ] & Unrestricted
+  dup 0 > if
+    1 - swap dup rot [ [ call ] dip ] dip times
+  else
+    drop drop
+  end
+end
+
+; A quotation is a value like any other: it can be kept in a type
+type Operation = operation( str [ i32 i32 -> i32 ] )
+
+word apply ( i32 i32 Operation -> )
+  operation-unpack swap print call print
+end
+
+; Make a quotation that adds `n`: the value is captured with `curry`,
+; since a quotation cannot see locals
+word adder ( i32 -> [ i32 -> i32 ] )
+  [ + ] curry
+end
+
+word main ( -> )
+  5 [ 1 + ] call print
+  5 [ 1 + ] dup compose call print
+  4 3 [ * ] curry call print
+  1 2 [ 10 * ] dip + print
+  5 [ 2 * ] keep + print
+  6 [ 1 + ] [ 1 - ] bi * print
+  1 [ 2 * ] 10 times print
+  [ "again" print ] 2 times
+  7 3 "sum" [ + ] operation apply
+  10 adder 100 adder compose 1 swap call print
+end
