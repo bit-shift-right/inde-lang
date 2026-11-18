@@ -1,5 +1,5 @@
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum, auto
 from fractions import Fraction
 from typing import NoReturn
@@ -101,6 +101,8 @@ VALID_KEYWORDS: tuple[str, ...] = (
     "let",
     "in",
     "const",
+    "import",
+    "pub",
 )
 
 
@@ -147,6 +149,7 @@ class Location:
     line: int
     column: int
     cursor: int
+    source: str | None = field(default=None, compare=False, repr=False)
 
 
 @dataclass(frozen=True)
@@ -320,8 +323,9 @@ class NumberParser:
 
 
 class Lexer:
-    def __init__(self, source: str) -> None:
+    def __init__(self, source: str, name: str | None = None) -> None:
         self.source = source
+        self.name = name
         self.cursor = 0
         self.line = 1
         self.column = 1
@@ -350,7 +354,7 @@ class Lexer:
             return ""
 
     def get_location(self) -> Location:
-        return Location(self.line, self.column, self.cursor)
+        return Location(self.line, self.column, self.cursor, self.name)
 
     def is_character_end_of_token(self, character: str) -> bool:
         return (
@@ -616,8 +620,8 @@ class Lexer:
                 return tokens
 
 
-def tokenize(source: str) -> list[Token]:
-    return Lexer(source).get_tokens()
+def tokenize(source: str, name: str | None = None) -> list[Token]:
+    return Lexer(source, name).get_tokens()
 
 
 def dump_tokens(tokens: list[Token]) -> None:

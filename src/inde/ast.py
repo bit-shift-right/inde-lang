@@ -193,6 +193,7 @@ class WordDeclaration(Node):
     signature: StackEffect
     where: tuple[Constraint, ...] = ()
     body: Body = ()
+    public: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -207,20 +208,28 @@ class TypeDeclaration(Node):
     params: tuple[str, ...] = ()
     variants: tuple[Variant, ...] = ()
     linear: bool = False
+    public: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)
 class ConstantDeclaration(Node):
     name: str
     value: Literal
+    public: bool = False
 
 
 Declaration = WordDeclaration | TypeDeclaration | ConstantDeclaration
 
 
 @dataclass(frozen=True, kw_only=True)
+class Import(Node):
+    name: str
+
+
+@dataclass(frozen=True, kw_only=True)
 class Program(Node):
     declarations: tuple[Declaration, ...] = ()
+    imports: tuple[Import, ...] = ()
 
 
 def dump(node: DataclassInstance, indent: str = "  ") -> str:

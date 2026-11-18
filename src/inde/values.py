@@ -26,7 +26,22 @@ class Quoted:
     parts: tuple[Body | Value, ...] = ()
 
 
-Payload = int | float | bool | str | tuple["Value", ...] | list["Value"] | Data | Quoted
+@dataclass(frozen=True)
+class Closure:
+    parts: tuple[str | Value, ...] = ()
+
+
+Payload = (
+    int
+    | float
+    | bool
+    | str
+    | tuple["Value", ...]
+    | list["Value"]
+    | Data
+    | Quoted
+    | Closure
+)
 
 
 @dataclass(frozen=True)

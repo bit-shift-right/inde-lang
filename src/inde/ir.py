@@ -56,6 +56,14 @@ def ir_arguments(arguments: tuple[TypeArgument, ...]) -> str:
     return "<" + ", ".join(ir_argument(a) for a in arguments) + ">"
 
 
+NAME_STOPS = frozenset(' \t<.#"')
+
+
+def function_name(word: str, arguments: tuple[TypeArgument, ...] = ()) -> str:
+    plain = word and not any(character in NAME_STOPS for character in word)
+    return f"${word if plain else quote_text(word)}{ir_arguments(arguments)}"
+
+
 def block_effect(inputs: tuple[Type, ...], outputs: tuple[Type, ...]) -> str:
     return "[" + " ".join([*map(ir_type, inputs), "->", *map(ir_type, outputs)]) + "]"
 
@@ -72,18 +80,15 @@ def quote_text(text: str) -> str:
 
 
 def ir_value(value: Value, value_type: Type) -> str:
-    if value_type in FLOAT_TYPES:
-        assert isinstance(value, float)
+    if value_type in FLOAT_TYPES and isinstance(value, float):
         return format_float(value, value_type)
-    if value_type == BOOL:
+    if value_type == BOOL and isinstance(value, bool):
         return "true" if value else "false"
-    if value_type == CHAR:
-        assert isinstance(value, str)
+    if value_type == CHAR and isinstance(value, str) and len(value) == 1:
         return f"U+{ord(value):04X}"
-    if value_type == STR:
-        assert isinstance(value, str)
+    if value_type == STR and isinstance(value, str):
         return quote(value, '"')
-    return str(value)
+    return repr(value) if isinstance(value, str) else str(value)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -411,13 +416,25 @@ def format_elements(value: object, array_type: Type) -> str:
     return "[" + " ".join(parts) + "]"
 
 
+SOURCE_STOPS = frozenset(' \t";')
+
+
+def debug_place(location: Location) -> str:
+    place = f"{location.line}:{location.column}"
+    source = location.source
+    if source is None:
+        return place
+    plain = source and not any(character in SOURCE_STOPS for character in source)
+    return f"{source if plain else quote_text(source)}:{place}"
+
+
 def format_body(body: Body, depth: int, lines: list[str], debug: bool) -> None:
     indent = "  " * depth
     for instruction in body:
         text = indent + instruction.text()
         if debug and instruction.location is not None:
             location = instruction.location
-            text += f"  ; {location.line}:{location.column}"
+            text += f"  ; {debug_place(location)}"
             if instruction.word is not None:
                 text += f" {instruction.word}"
         lines.append(text)

@@ -461,7 +461,7 @@ def test_body_form_errors(source: str, fragment: str) -> None:
 
 
 def repl(line: str) -> Declaration | Body:
-    return Parser(tokenize(line)).parse_repl_line()
+    return Parser(tokenize(line)).parse_repl_line()  # type:ignore[return-value]
 
 
 def test_repl_lines() -> None:

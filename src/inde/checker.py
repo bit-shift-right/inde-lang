@@ -1043,13 +1043,18 @@ class Checker:
 
     def names_a_word(self, name: str) -> bool:
         return (
-            name in self.words
+            (name in self.words and self.visible(name))
             or name in BUILTINS
             or name in STACK_WORDS
             or name in CONVERSIONS
             or name in BIT_CASTS
             or name in self.broken
         )
+
+    def visible(self, name: str) -> bool:
+        if self.words[name].location is None or self.current_word is None:
+            return True
+        return self.current_word.rpartition(":")[0] == name.rpartition(":")[0]
 
     def check_let(self, item: Let, stack: TypeStack, scope: Scope) -> None:
         count = len(item.names)
@@ -1737,10 +1742,11 @@ class Checker:
             )
 
 
-def error_order(error: IndeError) -> tuple[int, int, int]:
+def error_order(error: IndeError) -> tuple[int, str, int, int]:
     if error.location is None:
-        return (1, 0, 0)
-    return (0, error.location.line, error.location.column)
+        return (1, "", 0, 0)
+    source = error.location.source or ""
+    return (0, source, error.location.line, error.location.column)
 
 
 def check(program: Program, require_main: bool = False) -> CheckedProgram:

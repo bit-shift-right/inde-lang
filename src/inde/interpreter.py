@@ -4,6 +4,7 @@ import copy
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import NoReturn, TextIO
 
 from inde.ast import (
@@ -15,6 +16,7 @@ from inde.ast import (
     ConstructorPattern,
     FloatLiteral,
     If,
+    Import,
     IntegerLiteral,
     Item,
     Let,
@@ -31,6 +33,7 @@ from inde.builtins import BIT_CASTS, BUILTINS, CONVERSIONS, STACK_WORDS, StackWo
 from inde.checker import Checker, ConstantInfo, WordInfo, error_order
 from inde.errors import IndeError, IndeErrors, IndeTrap
 from inde.lexer import Location, quote, tokenize
+from inde.modules import Loader
 from inde.numeric import (
     FLOAT_UNARY,
     Failure,
@@ -765,26 +768,44 @@ def detached(value: Value) -> Value:
 
 class Session:
     def __init__(
-        self, output: TextIO | None = None, checker: Checker | None = None
+        self,
+        output: TextIO | None = None,
+        checker: Checker | None = None,
+        directory: Path | None = None,
+        library: Path | None = None,
     ) -> None:
         self.checker = checker or Checker()
         self.interpreter = Interpreter(
             self.checker.words, self.checker.constants, output
         )
         self.stack: list[Value] = []
+        self.loader = Loader(library)
+        prelude = self.loader.start_session(directory or Path.cwd())
+        if prelude:
+            self.declare(Program(declarations=tuple(prelude)))
 
     def run_line(self, line: str) -> None:
         try:
             parsed = Parser(tokenize(line), self.known_types()).parse_repl_line()
         except IndeError as error:
             raise IndeErrors([error]) from None
-        if isinstance(parsed, tuple):
-            self.run_body(parsed)
+        if isinstance(parsed, Import):
+            declarations = self.loader.session_import(parsed)
+            self.declare(Program(declarations=tuple(declarations)))
+        elif isinstance(parsed, tuple):
+            body = self.loader.session_resolve(parsed)
+            assert isinstance(body, tuple)
+            self.run_body(body)
         else:
-            self.declare(Program(declarations=(parsed,)))
+            declaration = self.loader.session_resolve(parsed)
+            assert not isinstance(declaration, tuple)
+            self.declare(Program(declarations=(declaration,)))
+            self.loader.session_declared(parsed)
 
     def known_types(self) -> dict[str, int]:
-        return {name: info.parameters for name, info in self.checker.types.items()}
+        known = {name: info.parameters for name, info in self.checker.types.items()}
+        known.update(self.loader.session_types())
+        return known
 
     def is_incomplete(self, text: str) -> bool:
         try:

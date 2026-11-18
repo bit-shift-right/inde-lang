@@ -100,6 +100,10 @@ PLAIN_RUNTIME_WORDS = frozenset(
 )
 
 
+def written(name: str) -> str:
+    return name.rpartition(":")[2]
+
+
 def underscored(word: str) -> str:
     return word.replace("-", "_")
 
@@ -176,8 +180,10 @@ class Elaborator(Checker):
         self.kept = kept
         self.begin()
         own = Effect(effect.inputs[kept:], effect.outputs[kept:])
-        self.words[INSTANCE] = WordInfo(INSTANCE, own, word.location)
-        self.current_word = INSTANCE
+        module = word.name.rpartition(":")[0]
+        instance = f"{module}:{INSTANCE}" if module else INSTANCE
+        self.words[instance] = WordInfo(instance, own, word.location)
+        self.current_word = instance
         try:
             stack = TypeStack(IMPLICIT_ROW, effect.inputs)
             self.check_body(word.declaration.body, stack)
@@ -199,7 +205,7 @@ class Elaborator(Checker):
                 for key, (before, after, variables) in self.recording.items()
             }
         finally:
-            del self.words[INSTANCE]
+            del self.words[instance]
             self.current_word = None
             self.recording = None
 
@@ -398,7 +404,7 @@ class Lowerer:
                     )
                 ]
             )
-        name = f"${word.name}{ir.ir_arguments(arguments)}"
+        name = ir.function_name(word.name, arguments)
         taken = {root.function.name for root in self.roots}
         if name in taken:
             name = next(
@@ -442,7 +448,7 @@ class Lowerer:
     def equality(self, compared: Type) -> str:
         if compared in self.equalities:
             return self.equalities[compared]
-        name = f"$=={ir.ir_arguments((compared,))}"
+        name = ir.function_name("==", (compared,))
         self.equalities[compared] = name
         function = ir.Function(name, (compared, compared), (BOOL,))
         self.roots.append(Root(function))
@@ -662,7 +668,9 @@ class FunctionLowering:
         location = item.location
         if isinstance(item, ConstantReference):
             literal = self.lowerer.checker.constants[item.name].value
-            out.append(self.literal(literal, record.after[-1], location, item.name))
+            out.append(
+                self.literal(literal, record.after[-1], location, written(item.name))
+            )
             return height, False
         if isinstance(
             item,
@@ -955,6 +963,7 @@ class FunctionLowering:
         out: list[ir.Instruction],
     ) -> tuple[int, bool]:
         name = item.name
+        spelled = written(name)
         location = item.location
         height = len(record.before)
         words = self.lowerer.checker.words
@@ -967,7 +976,7 @@ class FunctionLowering:
                         type=record.after[-1],
                         variant=name,
                         location=location,
-                        word=name,
+                        word=spelled,
                     )
                 )
                 return height - taken, False
@@ -977,7 +986,7 @@ class FunctionLowering:
                         type=record.before[-1],
                         variant=name.removesuffix("-unpack"),
                         location=location,
-                        word=name,
+                        word=spelled,
                     )
                 )
                 return height - 1, False
@@ -986,7 +995,9 @@ class FunctionLowering:
             if tail:
                 out.extend(self.drop_slots(location))
             out.append(
-                ir.Call(function=function.name, tail=tail, location=location, word=name)
+                ir.Call(
+                    function=function.name, tail=tail, location=location, word=spelled
+                )
             )
             return low, tail
 

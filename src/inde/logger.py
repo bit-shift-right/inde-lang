@@ -63,6 +63,7 @@ def format_error(
 ) -> str:
     header = source_name
     if error.location is not None:
+        header = error.location.source or source_name
         header += f":{error.location.line}:{error.location.column}"
     label = decorate_text("error:", Color.RED, stream=stream)
     return f"{header}: {label} {error.message}"
@@ -79,6 +80,7 @@ def report_errors(
 def format_trap(source_name: str, trap: IndeTrap, stream: TextIO | None = None) -> str:
     header = source_name
     if trap.location is not None:
+        header = trap.location.source or source_name
         header += f":{trap.location.line}:{trap.location.column}"
     label = decorate_text("trap:", Color.RED, stream=stream)
     return f"{header}: {label} {trap.message}"

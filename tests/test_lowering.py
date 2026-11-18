@@ -9,10 +9,13 @@ from inde.errors import IndeErrors
 from inde.ir import Module, format_module
 from inde.lowering import lower
 from inde.parser import parse
+from inde.verifier import verify
 
 
 def compile_source(source: str) -> Module:
-    return lower(parse(source))
+    module = lower(parse(source))
+    verify(module)
+    return module
 
 
 def module_text(source: str) -> str:

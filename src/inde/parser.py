@@ -1,3 +1,5 @@
+import re
+from dataclasses import replace
 from typing import NoReturn
 
 from inde.ast import (
@@ -14,6 +16,7 @@ from inde.ast import (
     Declaration,
     FloatLiteral,
     If,
+    Import,
     IntegerLiteral,
     Item,
     Let,
@@ -68,6 +71,8 @@ CORE_TYPE_ARGUMENTS: dict[str, int] = {
 }
 
 CORE_LIBRARY_ARGUMENTS: dict[str, int] = {"Option": 1, "Result": 2, "Pair": 2}
+
+MODULE_NAME = re.compile(r"[a-z][a-z0-9-]*")
 
 
 def collect_type_arguments(tokens: list[Token]) -> dict[str, int]:
@@ -202,7 +207,9 @@ class Parser:
 
     def at_declaration_start(self) -> bool:
         return (
-            self.at_keyword("word")
+            self.at_keyword("pub")
+            or self.at_keyword("import")
+            or self.at_keyword("word")
             or self.at_keyword("type")
             or self.at_keyword("const")
             or (
@@ -220,6 +227,7 @@ class Parser:
 
     def parse_program(self) -> Program:
         start = self.peek()
+        imports: list[Import] = []
         declarations: list[Declaration] = []
         while not self.at_token(TokenType.END_OF_FILE):
             if not self.at_declaration_start():
@@ -240,15 +248,51 @@ class Parser:
                 continue
             before = self.position
             try:
-                declarations.append(self.parse_declaration())
+                if self.at_keyword("import"):
+                    if declarations:
+                        self.errors.append(
+                            self.error("imports come before every declaration")
+                        )
+                    imports.append(self.parse_import())
+                else:
+                    declarations.append(self.parse_declaration())
             except IndeError as error:
                 self.errors.append(error)
                 if self.position == before:
                     self.advance()
                 self.synchronize()
-        return Program(declarations=tuple(declarations), location=start.location)
+        return Program(
+            declarations=tuple(declarations),
+            imports=tuple(imports),
+            location=start.location,
+        )
+
+    def parse_import(self) -> Import:
+        start = self.expect_token(TokenType.KEYWORD, "import")
+        token = self.peek()
+        if token.type is TokenType.END_OF_FILE:
+            self.fail("expected a module name after `import`")
+        if token.type is not TokenType.NAME or not MODULE_NAME.fullmatch(token.text):
+            self.fail(
+                "a module name is lowercase letters, digits and `-`, starting with "
+                f"a letter; found {self.describe_token(token)}"
+            )
+        self.advance()
+        return Import(name=token.text, location=start.location)
 
     def parse_declaration(self) -> Declaration:
+        public = self.accept_token(TokenType.KEYWORD, "pub") is not None
+        if public and not self.at_declaration_start():
+            self.fail(
+                "`pub` comes before a `word`, `type` or `const` declaration, "
+                f"found {self.describe_token(self.peek())}"
+            )
+        if self.at_keyword("pub") or self.at_keyword("import"):
+            self.fail(f"`{self.peek().text}` cannot follow `pub`")
+        declaration = self.parse_plain_declaration()
+        return replace(declaration, public=True) if public else declaration
+
+    def parse_plain_declaration(self) -> Declaration:
         if self.at_keyword("word"):
             return self.parse_word_declaration()
         if self.at_keyword("const"):
@@ -720,9 +764,11 @@ class Parser:
             f"expected a pattern after `case`, found {self.describe_token(token)}"
         )
 
-    def parse_repl_line(self) -> Declaration | Body:
-        if self.at_declaration_start():
-            result: Declaration | Body = self.parse_declaration()
+    def parse_repl_line(self) -> Declaration | Import | Body:
+        if self.at_keyword("import"):
+            result: Declaration | Import | Body = self.parse_import()
+        elif self.at_declaration_start():
+            result = self.parse_declaration()
         else:
             result = self.parse_body()
         if not self.at_token(TokenType.END_OF_FILE):
@@ -733,12 +779,16 @@ class Parser:
         return result
 
 
-def parse(source: str) -> Program:
+def parse(
+    source: str,
+    name: str | None = None,
+    known_types: dict[str, int] | None = None,
+) -> Program:
     try:
-        tokens = tokenize(source)
+        tokens = tokenize(source, name)
     except IndeError as error:
         raise IndeErrors([error]) from None
-    parser = Parser(tokens)
+    parser = Parser(tokens, known_types)
     program = parser.parse_program()
     if parser.errors:
         raise IndeErrors(parser.errors)
