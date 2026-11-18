@@ -7,7 +7,8 @@ from typing import TextIO
 
 from inde import ir
 from inde.errors import IndeTrap
-from inde.interpreter import MAX_CALL_DEPTH, UNIT_VALUE, Interpreter, display
+from inde.interpreter import MAX_CALL_DEPTH, UNIT_VALUE, Interpreter
+from inde.system import System, display
 from inde.type_model import BOOL, CHAR, STR, UNIT, Effect, Type, quotation_of
 from inde.values import Closure, Data, Value, array, boolean, character, string
 
@@ -59,13 +60,18 @@ class Activation:
 
 
 class Machine:
-    def __init__(self, module: ir.Module, output: TextIO | None = None) -> None:
+    def __init__(
+        self,
+        module: ir.Module,
+        output: TextIO | None = None,
+        system: System | None = None,
+    ) -> None:
         self.module = module
         self.functions = {function.name: function for function in module.functions}
         self.data = {data.name: data for data in module.data}
         self.runtime = {d.name: d for d in module.runtime}
         self.output = output or sys.stdout
-        self.words = Interpreter({}, {}, self.output)
+        self.words = Interpreter({}, {}, self.output, system)
         self.deepest = 0
 
     def run_main(self, error_output: TextIO | None = None) -> int:
@@ -78,7 +84,7 @@ class Machine:
         assert isinstance(result, Data)
         if result.constructor == "ok":
             return 0
-        print(display(result.fields[0]), file=error_output or sys.stderr)
+        self.words.system.report(display(result.fields[0]), error_output)
         return 1
 
     def run(self, name: str, stack: list[Value]) -> None:

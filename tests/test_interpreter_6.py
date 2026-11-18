@@ -70,10 +70,10 @@ def test_early_exit_skips_the_rest_of_the_word() -> None:
         "word noisy ( i32 -> Option[i32] )\n"
         '  "before" print 2147483647 add ? "after" print some\n'
         "end\n"
-        "word show ( Option[i32] -> )\n"
+        "word report ( Option[i32] -> )\n"
         '  match case some print case none "none" print end\n'
         "end\n"
-        "word main ( -> ) 0 noisy show 1 noisy show end\n"
+        "word main ( -> ) 0 noisy report 1 noisy report end\n"
     )
     lines, status, _ = run(source)
     assert status == 0

@@ -132,7 +132,10 @@ def test_the_repl_shows_a_quotation_by_its_type() -> None:
 def test_the_repl_keeps_quotations_between_lines() -> None:
     session = session_after("[ 2 * ]", "[ 1 + ]", "compose", "5 swap call")
     assert session.show_stack() == "stack: 11"
-    session = session_after(DIP.replace("\n", " "), "1 2 [ 10 * ]", "dip")
+    under = DIP.replace("word dip", "word under").replace("\n", " ")
+    session = session_after(under, "1 2 [ 10 * ]", "under")
+    assert session.show_stack() == "stack: 10 | 2"
+    session = session_after("1 2 [ 10 * ]", "dip")
     assert session.show_stack() == "stack: 10 | 2"
 
 

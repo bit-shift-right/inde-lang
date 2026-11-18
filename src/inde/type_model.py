@@ -83,6 +83,10 @@ U8, U16, U32, U64 = Type("u8"), Type("u16"), Type("u32"), Type("u64")
 F32, F64 = Type("f32"), Type("f64")
 BOOL, CHAR, STR, UNIT = Type("bool"), Type("char"), Type("str"), Type("unit")
 STRBUF = Type("strbuf")
+FILE = Type("File")
+IO_ERROR = Type("IoError")
+IO_ERROR_KIND = Type("IoErrorKind")
+OPAQUE_LIBRARY_TYPES: tuple[Type, ...] = (FILE, IO_ERROR)
 
 SIGNED_INTEGER_TYPES: tuple[Type, ...] = (I8, I16, I32, I64)
 UNSIGNED_INTEGER_TYPES: tuple[Type, ...] = (U8, U16, U32, U64)
@@ -91,7 +95,7 @@ FLOAT_TYPES: tuple[Type, ...] = (F32, F64)
 NUMBER_TYPES: tuple[Type, ...] = INTEGER_TYPES + FLOAT_TYPES
 
 
-CORE_LINEAR_TYPES: tuple[str, ...] = ("strbuf", "arraybuf")
+CORE_LINEAR_TYPES: tuple[str, ...] = ("strbuf", "arraybuf", "File")
 
 QUOTATION = "[ ]"
 UNRESTRICTED = Type("unrestricted")

@@ -127,9 +127,10 @@ def test_results() -> None:
         "word safe-div ( i32 i32 -> Result[i32, str] )\n"
         '  dup 0 == if drop drop "division by zero" err else / ok end\n'
         "end\n"
-        "word show ( Result[i32, str] -> ) match case ok print case err print end end\n"
+        "word report ( Result[i32, str] -> ) match case ok print case err print end "
+        "end\n"
     )
-    assert printed("7 2 safe-div show 1 0 safe-div show", declarations) == [
+    assert printed("7 2 safe-div report 1 0 safe-div report", declarations) == [
         "3",
         "division by zero",
     ]

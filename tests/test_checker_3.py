@@ -202,7 +202,7 @@ def test_where_clause_errors(source: str, fragment: str) -> None:
         "word twice ( T -> T T ) where T: Unrestricted dup end",
         "word lose ( T -> ) where T: Unrestricted drop end",
         "word square ( T -> T ) where T: Num dup * end",
-        "word show ( T -> ) where T: Display print end",
+        "word report ( T -> ) where T: Display print end",
         "word same ( T T -> bool ) where T: Eq == end",
         "word same ( T T -> bool ) where T: PartialEq == end",
         "word less ( T T -> bool ) where T: Ord < end",
@@ -310,13 +310,6 @@ def test_a_constraint_brings_others_with_it(source: str) -> None:
                 "add `where T: Integer` to the signature"
             ),
         ),
-        (
-            "word t ( T -> array[T] ) drop { } end",
-            (
-                "the elements of an `array` must be unrestricted, but `T` may be "
-                "linear; add `where T: Unrestricted` (in `t`)"
-            ),
-        ),
     ],
 )
 def test_a_body_may_assume_nothing_about_a_type_variable(
@@ -328,18 +321,18 @@ def test_a_body_may_assume_nothing_about_a_type_variable(
 def test_callers_must_meet_the_constraints() -> None:
     declarations = (
         "word square ( T -> T ) where T: Num dup * end\n"
-        "word show ( T -> ) where T: Display print end\n"
+        "word report ( T -> ) where T: Display print end\n"
         "word twice ( T -> T T ) where T: Unrestricted dup end\n" + HANDLE + SHAPES
     )
     accepts("3 square 1.5 square 2u8 square", "", "i32 f32 u8", declarations)
-    accepts('1 show "a" show true show 1.5 show', "", "", declarations)
+    accepts('1 report "a" report true report 1.5 report', "", "", declarations)
     assert (
         body_fails('"a" square', "", "str", declarations)
         == "`str` does not satisfy `Num`, which `square` requires of its `T`"
     )
     assert (
-        body_fails("dot show", "", "", declarations)
-        == "`Shape` does not satisfy `Display`, which `show` requires of its `T`"
+        body_fails("dot report", "", "", declarations)
+        == "`Shape` does not satisfy `Display`, which `report` requires of its `T`"
     )
     assert "`Handle` does not satisfy `Unrestricted`, which `twice` requires" in (
         body_fails("twice", "Handle", "Handle Handle", declarations)
@@ -823,13 +816,6 @@ def test_a_type_holding_arrays_still_takes_any_other_parameter() -> None:
             ),
         ),
         (
-            BAG + "word t ( Option[Bag[T]] -> Option[Bag[T]] ) end",
-            (
-                "`Bag` holds an `array` of its `T`, which must be unrestricted, "
-                "but `T` may be linear; add `where T: Unrestricted` (in `t`)"
-            ),
-        ),
-        (
             BAG + HANDLE + "type Box[T] = box( Bag[T] )\n"
             "word t ( Box[Handle] -> Box[Handle] ) end",
             (
@@ -859,9 +845,50 @@ def test_a_linear_type_cannot_fill_an_array_parameter(
     assert message in get_failure_messages(source)
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "word t ( T -> array[T] ) drop { } end",
+        "word t ( T -> array[T] ) dup drop { } swap drop end",
+        "word t ( array[T] -> T T ) 0u32 array-get dup end",
+        "word t ( array[Option[T]] -> ) 0u32 array-get drop end",
+        "word t ( array[Q] -> ) where Q: [ i32 -> i32 ] 0u32 array-get drop end",
+        "word t ( array[T] -> array[T] ) arraybuf-from-array arraybuf-freeze end",
+        BAG + "word t ( Option[Bag[T]] -> Option[Bag[T]] ) end",
+        BAG + "word t ( Bag[T] -> ) drop end",
+    ],
+)
+def test_an_array_element_is_assumed_unrestricted(source: str) -> None:
+    check(parse(source))
+
+
+@pytest.mark.parametrize(
+    ("source", "message"),
+    [
+        (
+            "word t ( T array[T] -> ) drop drop end\nword u ( strbuf -> ) { } t end",
+            "`strbuf` does not satisfy `Unrestricted`, which `t` requires of its `T`",
+        ),
+        (
+            "word t ( T -> array[[ T -> T ]] ) drop { } end",
+            "`drop` cannot discard a value of type `T`",
+        ),
+        (
+            "word t ( array[linear [ -> ]] -> ) drop end",
+            (
+                "the elements of an `array` must be unrestricted, but "
+                "`linear [ -> ]` is linear (in `t`)"
+            ),
+        ),
+    ],
+)
+def test_the_assumption_reaches_only_array_elements(source: str, message: str) -> None:
+    assert any(message in found for found in get_failure_messages(source))
+
+
 def test_a_generic_word_over_such_a_type() -> None:
     source = BAG + (
-        "word size ( Bag[T] -> i32 ) where T: Unrestricted\n"
+        "word size ( Bag[T] -> i32 )\n"
         "  match case bag drop 1 case empty 0 end\n"
         "end\n"
         "word t ( -> i32 ) { 1 2 } bag size end\n"

@@ -11,6 +11,7 @@ from inde.type_model import (
     FLOAT_TYPES,
     INTEGER_TYPES,
     LINEAR,
+    OPAQUE_LIBRARY_TYPES,
     STR,
     STRBUF,
     UNIT,
@@ -22,8 +23,48 @@ TypeArgument = Type | tuple[Type, ...]
 
 CORE_TYPE_NAMES = frozenset(
     {t.name for t in (*INTEGER_TYPES, *FLOAT_TYPES, BOOL, CHAR, STR, UNIT, STRBUF)}
+    | {t.name for t in OPAQUE_LIBRARY_TYPES}
     | {"array", "arraybuf"}
 )
+
+RUNTIME_2_CALLS = frozenset(
+    {
+        "write",
+        "eprint",
+        "ewrite",
+        "show",
+        "show_quoted",
+        "read_line",
+        "read_all",
+        "args",
+        "env_get",
+        "read_file",
+        "read_file_bytes",
+        "write_file",
+        "append_file",
+        "write_file_bytes",
+        "file_open",
+        "file_create",
+        "file_append",
+        "file_read_line",
+        "file_read_all",
+        "file_read_bytes",
+        "file_write",
+        "file_write_bytes",
+        "file_close",
+        "io_error_kind",
+    }
+)
+
+
+RUNTIME_3_CALLS = frozenset({"str_parse_f64", "str_parse_f32"})
+
+
+def runtime_version_of(module: Module) -> int:
+    names = {declaration.name.partition("<")[0][3:] for declaration in module.runtime}
+    if names & RUNTIME_3_CALLS:
+        return 3
+    return 2 if names & RUNTIME_2_CALLS else 1
 
 
 def ir_type(checked_type: Type) -> str:

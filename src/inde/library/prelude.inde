@@ -1,0 +1,57 @@
+pub word nip ( A B -> B ) where A: Unrestricted swap drop end
+
+pub word tuck ( A B -> B A B ) where B: Unrestricted swap over end
+
+pub word dup2 ( A B -> A B A B ) where A: Unrestricted, B: Unrestricted over over end
+
+pub word dip ( ..a T Q -> ..b T ) where Q: [ ..a -> ..b ]
+  swap [ ] curry compose call
+end
+
+pub word keep ( ..a T Q -> ..b T ) where Q: [ ..a T -> ..b ], T: Unrestricted
+  over [ call ] dip
+end
+
+pub word bi ( ..a T P Q -> ..c )
+  where P: [ ..a T -> ..b ], Q: [ ..b T -> ..c ], T: Unrestricted
+  [ keep ] dip call
+end
+
+pub word times ( ..a Q u32 -> ..a ) where Q: [ ..a -> ..a ] & Unrestricted
+  dup 0u32 > if
+    1u32 - swap dup rot [ [ call ] dip ] dip times
+  else
+    drop drop
+  end
+end
+
+pub word option-or ( Option[T] T -> T ) where T: Unrestricted
+  swap match case some nip case none end
+end
+
+pub word option-map ( ..a Option[T] Q -> ..a Option[U] )
+  where Q: [ ..a T -> ..a U ] & Unrestricted
+  swap match case some swap call some case none drop none end
+end
+
+pub word option-to-result ( Option[T] E -> Result[T, E] ) where E: Unrestricted
+  swap match case some nip ok case none err end
+end
+
+pub word result-or ( Result[T, E] T -> T ) where T: Unrestricted, E: Unrestricted
+  swap match case ok nip case err drop end
+end
+
+pub word result-map ( ..a Result[T, E] Q -> ..a Result[U, E] )
+  where Q: [ ..a T -> ..a U ] & Unrestricted
+  swap match case ok swap call ok case err nip err end
+end
+
+pub word result-map-err ( ..a Result[T, E] Q -> ..a Result[T, F] )
+  where Q: [ ..a E -> ..a F ] & Unrestricted
+  swap match case ok nip ok case err swap call err end
+end
+
+pub word result-to-option ( Result[T, E] -> Option[T] ) where E: Unrestricted
+  match case ok some case err drop none end
+end

@@ -1,0 +1,321 @@
+word each-from ( ..a array[T] Q u32 -> ..a )
+  where Q: [ ..a T -> ..a ] & Unrestricted
+  let items action i in
+    i items array-len < if
+      items i array-get action call
+      items action i 1u32 + each-from
+    end
+  end
+end
+
+pub word array-each ( ..a array[T] Q -> ..a )
+  where Q: [ ..a T -> ..a ] & Unrestricted
+  0u32 each-from
+end
+
+word map-from ( ..a arraybuf[U] array[T] Q u32 -> ..a arraybuf[U] )
+  where Q: [ ..a T -> ..a U ] & Unrestricted
+  let results items action i in
+    i items array-len < if
+      items i array-get action call results swap arraybuf-push
+      items action i 1u32 + map-from
+    else
+      results
+    end
+  end
+end
+
+pub word array-map ( ..a array[T] Q -> ..a array[U] )
+  where Q: [ ..a T -> ..a U ] & Unrestricted
+  let items action in arraybuf-new items action 0u32 map-from arraybuf-freeze end
+end
+
+word filter-from ( ..a arraybuf[T] array[T] Q u32 -> ..a arraybuf[T] )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  let results items action i in
+    i items array-len < if
+      items i array-get action call if
+        results items i array-get arraybuf-push
+      else
+        results
+      end
+      items action i 1u32 + filter-from
+    else
+      results
+    end
+  end
+end
+
+pub word array-filter ( ..a array[T] Q -> ..a array[T] )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  let items action in arraybuf-new items action 0u32 filter-from arraybuf-freeze end
+end
+
+word fold-from ( ..a A array[T] Q u32 -> ..a A )
+  where Q: [ ..a A T -> ..a A ] & Unrestricted
+  let items action i in
+    i items array-len < if
+      items i array-get action call
+      items action i 1u32 + fold-from
+    end
+  end
+end
+
+pub word array-fold ( ..a array[T] A Q -> ..a A )
+  where Q: [ ..a A T -> ..a A ] & Unrestricted
+  let items accumulator action in accumulator items action 0u32 fold-from end
+end
+
+word find-from ( ..a array[T] Q u32 -> ..a Option[T] )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  let items action i in
+    i items array-len < if
+      items i array-get action call if
+        items i array-get some
+      else
+        items action i 1u32 + find-from
+      end
+    else
+      none
+    end
+  end
+end
+
+pub word array-find ( ..a array[T] Q -> ..a Option[T] )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  0u32 find-from
+end
+
+pub word array-any? ( ..a array[T] Q -> ..a bool )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  array-find match case some drop true case none false end
+end
+
+word all-from ( ..a array[T] Q u32 -> ..a bool )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  let items action i in
+    i items array-len < if
+      items i array-get action call if
+        items action i 1u32 + all-from
+      else
+        false
+      end
+    else
+      true
+    end
+  end
+end
+
+pub word array-all? ( ..a array[T] Q -> ..a bool )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  0u32 all-from
+end
+
+pub word array-empty? ( array[T] -> bool ) array-len 0u32 == end
+
+word push-from ( arraybuf[T] array[T] u32 -> arraybuf[T] )
+  let items i in
+    i items array-len < if
+      items i array-get arraybuf-push items i 1u32 + push-from
+    end
+  end
+end
+
+pub word array-concat ( array[T] array[T] -> array[T] )
+  let first second in
+    arraybuf-new first 0u32 push-from second 0u32 push-from arraybuf-freeze
+  end
+end
+
+pub word array-append ( array[T] T -> array[T] )
+  let items item in
+    arraybuf-new items 0u32 push-from item arraybuf-push arraybuf-freeze
+  end
+end
+
+word reverse-from ( arraybuf[T] array[T] u32 -> arraybuf[T] )
+  let items i in
+    i 0u32 > if
+      items i 1u32 - array-get arraybuf-push items i 1u32 - reverse-from
+    end
+  end
+end
+
+pub word array-reverse ( array[T] -> array[T] )
+  let items in arraybuf-new items items array-len reverse-from arraybuf-freeze end
+end
+
+word range-from ( arraybuf[u32] u32 u32 -> arraybuf[u32] )
+  let i stop in
+    i stop < if i arraybuf-push i 1u32 + stop range-from end
+  end
+end
+
+pub word array-range ( u32 u32 -> array[u32] )
+  arraybuf-new rot rot range-from arraybuf-freeze
+end
+
+word merge-with ( arraybuf[T] array[T] u32 array[T] u32 Q -> arraybuf[T] )
+  where Q: [ T T -> bool ] & Unrestricted
+  let left i right j before? in
+    i left array-len < if
+      j right array-len < if
+        right j array-get left i array-get before? call if
+          right j array-get arraybuf-push left i right j 1u32 + before? merge-with
+        else
+          left i array-get arraybuf-push left i 1u32 + right j before? merge-with
+        end
+      else
+        left i push-from
+      end
+    else
+      right j push-from
+    end
+  end
+end
+
+pub word array-sort-with ( array[T] Q -> array[T] )
+  where Q: [ T T -> bool ] & Unrestricted
+  let items before? in
+    items array-len 2u32 < if
+      items
+    else
+      items array-len 2u32 / let middle in
+        arraybuf-new
+        items 0u32 middle array-slice before? array-sort-with 0u32
+        items middle items array-len array-slice before? array-sort-with 0u32
+        before? merge-with arraybuf-freeze
+      end
+    end
+  end
+end
+
+word zip-keys ( arraybuf[Pair[K, T]] array[K] array[T] u32 -> arraybuf[Pair[K, T]] )
+  let keys items i in
+    i items array-len < if
+      keys i array-get items i array-get pair arraybuf-push
+      keys items i 1u32 + zip-keys
+    end
+  end
+end
+
+pub word array-sort-by ( ..a array[T] Q -> ..a array[T] )
+  where Q: [ ..a T -> ..a K ] & Unrestricted, K: Ord & Unrestricted
+  let items action in
+    items action array-map let keys in
+      arraybuf-new keys items 0u32 zip-keys arraybuf-freeze
+      [ pair-unpack drop swap pair-unpack drop > ] array-sort-with
+      [ pair-unpack nip ] array-map
+    end
+  end
+end
+
+pub word array-sort ( array[T] -> array[T] ) where T: Ord
+  [ ] array-sort-by
+end
+
+word unique-from ( arraybuf[T] array[T] u32 -> arraybuf[T] )
+  where T: Eq
+  let items i in
+    i items array-len < if
+      items i array-get items i 1u32 - array-get == if
+        items i 1u32 + unique-from
+      else
+        items i array-get arraybuf-push items i 1u32 + unique-from
+      end
+    end
+  end
+end
+
+pub word array-unique ( array[T] -> array[T] ) where T: Eq
+  let items in
+    arraybuf-new
+    items array-empty? not if
+      items 0u32 array-get arraybuf-push items 1u32 unique-from
+    end
+    arraybuf-freeze
+  end
+end
+
+word smaller ( u32 u32 -> u32 ) dup2 < rot rot select end
+
+pub word array-take ( array[T] u32 -> array[T] )
+  let items count in items 0u32 count items array-len smaller array-slice end
+end
+
+pub word array-drop ( array[T] u32 -> array[T] )
+  let items count in
+    items count items array-len smaller items array-len array-slice
+  end
+end
+
+pub word array-first ( array[T] -> Option[T] ) 0u32 array-get.checked end
+
+pub word array-last ( array[T] -> Option[T] )
+  let items in
+    items array-empty? if none else items items array-len 1u32 - array-get some end
+  end
+end
+
+word index-from ( array[T] T u32 -> Option[u32] ) where T: Eq
+  let items wanted i in
+    i items array-len < if
+      items i array-get wanted == if
+        i some
+      else
+        items wanted i 1u32 + index-from
+      end
+    else
+      none
+    end
+  end
+end
+
+pub word array-index-of ( array[T] T -> Option[u32] ) where T: Eq
+  0u32 index-from
+end
+
+word count-from ( ..a array[T] Q u32 u32 -> ..a u32 )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  let items action i count in
+    i items array-len < if
+      items i array-get action call if
+        items action i 1u32 + count 1u32 + count-from
+      else
+        items action i 1u32 + count count-from
+      end
+    else
+      count
+    end
+  end
+end
+
+pub word array-count ( ..a array[T] Q -> ..a u32 )
+  where Q: [ ..a T -> ..a bool ] & Unrestricted
+  0u32 0u32 count-from
+end
+
+word zip-from ( arraybuf[Pair[A, B]] array[A] array[B] u32 -> arraybuf[Pair[A, B]] )
+  let firsts seconds i in
+    i firsts array-len < i seconds array-len < and if
+      firsts i array-get seconds i array-get pair arraybuf-push
+      firsts seconds i 1u32 + zip-from
+    end
+  end
+end
+
+pub word array-zip ( array[A] array[B] -> array[Pair[A, B]] )
+  let firsts seconds in arraybuf-new firsts seconds 0u32 zip-from arraybuf-freeze end
+end
+
+word flatten-from ( arraybuf[T] array[array[T]] u32 -> arraybuf[T] )
+  let groups i in
+    i groups array-len < if
+      groups i array-get 0u32 push-from groups i 1u32 + flatten-from
+    end
+  end
+end
+
+pub word array-flatten ( array[array[T]] -> array[T] )
+  arraybuf-new swap 0u32 flatten-from arraybuf-freeze
+end

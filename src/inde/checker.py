@@ -60,8 +60,10 @@ from inde.type_model import (
     I32,
     IMPLICIT_ROW,
     INTEGER_TYPES,
+    IO_ERROR,
     LINEAR,
     NUMBER_TYPES,
+    OPAQUE_LIBRARY_TYPES,
     SIGNED_INTEGER_TYPES,
     STR,
     UNIT,
@@ -174,6 +176,8 @@ LIBRARY = parse(
     "type Option[T] = none | some( T )\n"
     "type Result[T, E] = ok( T ) | err( E )\n"
     "type Pair[A, B] = pair( A B )\n"
+    "type IoErrorKind = not-found | permission-denied | already-exists\n"
+    "  | is-a-directory | not-a-directory | invalid-text | other-error\n"
 )
 
 
@@ -184,6 +188,8 @@ class Checker:
         self.constants: dict[str, ConstantInfo] = {}
         self.words: dict[str, WordInfo] = {}
         self.linear_types: set[str] = set()
+        self.opaque_types: set[str] = set()
+        self.unavailable: dict[str, str] = {}
         self.field_types: dict[str, list[Type]] = {}
         self.variants: dict[str, tuple[str, ...]] = {}
         self.type_parameters: dict[str, tuple[str, ...]] = {}
@@ -209,6 +215,8 @@ class Checker:
             assert isinstance(declaration, TypeDeclaration)
             self.declare_type(declaration)
             self.declare_constructors(declaration)
+        for opaque in OPAQUE_LIBRARY_TYPES:
+            self.types[opaque.name] = TypeInfo(opaque.name, 0)
         self.types = {
             name: replace(info, location=None) for name, info in self.types.items()
         }
@@ -253,6 +261,7 @@ class Checker:
 
         self.derive_linear_types()
         self.derive_unrestricted_parameters()
+        self.withdraw_linear_field_copies()
 
         for word in list(self.words.values()):
             with self.recover():
@@ -288,6 +297,8 @@ class Checker:
         self.type_parameters[name] = declaration.params
         if declaration.linear:
             self.linear_types.add(name)
+        if declaration.opaque:
+            self.opaque_types.add(name)
 
     def declare_constant(self, declaration: ConstantDeclaration) -> None:
         name = declaration.name
@@ -575,24 +586,71 @@ class Checker:
             found.extend(self.variables_held_in_arrays(arg, required))
         return found
 
+    def withdraw_linear_field_copies(self) -> None:
+        for name, word in list(self.words.items()):
+            declaration = word.declaration
+            if declaration is None or declaration.copies_field is None:
+                continue
+            self.begin(word.effect.where)
+            field_type = word.effect.outputs[-1]
+            if name.endswith("!"):
+                field_type = word.effect.inputs[-1]
+            if not self.is_linear(field_type):
+                continue
+            del self.words[name]
+            prefix, _, written = name.rpartition(":")
+            base = written[:-1]
+            module = f"{prefix}:" if prefix else ""
+            field = declaration.copies_field
+            self.unavailable[name] = (
+                f"`{written}` is not defined, because the field `{field}` holds a "
+                f"linear `{field_type}`; use `{module}change-{base}` or "
+                f"`{module}exchange-{base}`"
+            )
+
     def check_array_elements(self, word: WordInfo) -> None:
         if word.kind == "unpack":
             return
         self.begin(word.effect.where)
+        implied: list[str] = []
         for checked_type in word.effect.inputs + word.effect.outputs:
-            self.require_unrestricted_elements(checked_type, word)
+            self.require_unrestricted_elements(checked_type, word, implied)
+        if implied:
+            where = word.effect.where + tuple((v, "Unrestricted") for v in implied)
+            effect = replace(word.effect, where=where)
+            self.words[word.name] = replace(word, effect=effect)
 
-    def require_unrestricted_elements(self, checked_type: Type, word: WordInfo) -> None:
+    def linear_variables(self, checked_type: Type) -> list[str]:
+        if is_type_variable(checked_type):
+            return [checked_type.name] if self.is_linear(checked_type) else []
+        found: list[str] = []
+        for arg in checked_type.args:
+            for name in self.linear_variables(arg):
+                if name not in found:
+                    found.append(name)
+        return found
+
+    def assume_unrestricted(self, variables: list[str]) -> None:
+        assumptions = dict(self.assumptions)
+        for name in variables:
+            assumptions[name] = assumptions.get(name, frozenset()) | {"Unrestricted"}
+        self.assumptions = assumptions
+
+    def require_unrestricted_elements(
+        self, checked_type: Type, word: WordInfo, implied: list[str]
+    ) -> None:
         positions = self.unrestricted_parameters.get(checked_type.name, frozenset())
         for position in sorted(positions):
             element = checked_type.args[position]
             if not self.is_linear(element):
                 continue
-            reason = (
-                f"`{element}` may be linear; add `where {element}: Unrestricted`"
-                if is_type_variable(element)
-                else f"`{element}` is linear"
-            )
+            variables = self.linear_variables(element)
+            saved = self.assumptions
+            self.assume_unrestricted(variables)
+            if variables and not self.is_linear(element):
+                implied.extend(variables)
+                continue
+            self.assumptions = saved
             if checked_type.name == "array":
                 rule = "the elements of an `array` must be unrestricted"
             else:
@@ -601,9 +659,11 @@ class Checker:
                     f"`{checked_type.name}` holds an `array` of its `{parameter}`, "
                     "which must be unrestricted"
                 )
-            self.fail(f"{rule}, but {reason} (in `{word.name}`)", word.location)
+            self.fail(
+                f"{rule}, but `{element}` is linear (in `{word.name}`)", word.location
+            )
         for arg in checked_type.args:
-            self.require_unrestricted_elements(arg, word)
+            self.require_unrestricted_elements(arg, word, implied)
 
     def is_linear(self, checked_type: Type) -> bool:
         if is_type_variable(checked_type):
@@ -640,7 +700,8 @@ class Checker:
         if constraint == "PartialOrd":
             return checked_type in NUMBER_TYPES or checked_type in (BOOL, CHAR, STR)
         assert constraint == "Display", constraint
-        return checked_type in NUMBER_TYPES or checked_type in (BOOL, CHAR, STR, UNIT)
+        displayable = (BOOL, CHAR, STR, UNIT, IO_ERROR)
+        return checked_type in NUMBER_TYPES or checked_type in displayable
 
     def is_eq(self, checked_type: Type, visiting: set[Type]) -> bool:
         if is_type_variable(checked_type):
@@ -650,6 +711,10 @@ class Checker:
         if checked_type.name == "array":
             return self.is_eq(checked_type.args[0], visiting)
         if checked_type.name not in self.variants:
+            return False
+        if checked_type.name in self.opaque_types and not self.inside(
+            checked_type.name
+        ):
             return False
         if checked_type in visiting:
             return True
@@ -664,6 +729,15 @@ class Checker:
         culprit = self.without_equality(checked_type, set())
         if culprit is None:
             return ""
+        if culprit.name in self.opaque_types and not self.inside(culprit.name):
+            module = culprit.name.rpartition(":")[0]
+            opaque = (
+                f"`{culprit}` is opaque, so only module `{module}` can compare its "
+                "values"
+            )
+            if culprit == checked_type:
+                return f"; {opaque}"
+            return f"; `{checked_type}` has no equality, because {opaque}"
         if culprit == checked_type:
             return f"; `{checked_type}` has no equality"
         if culprit in FLOAT_TYPES:
@@ -1051,6 +1125,10 @@ class Checker:
             or name in self.broken
         )
 
+    def inside(self, name: str) -> bool:
+        module = self.current_word.rpartition(":")[0] if self.current_word else ""
+        return module == name.rpartition(":")[0]
+
     def visible(self, name: str) -> bool:
         if self.words[name].location is None or self.current_word is None:
             return True
@@ -1389,6 +1467,8 @@ class Checker:
             self.apply_stack_word(STACK_WORDS[name], stack, call.location)
         elif name in self.broken:
             raise _Abandon
+        elif name in self.unavailable:
+            self.fail(self.unavailable[name], call.location)
         elif name in self.hidden_locals:
             self.fail(
                 f"`{name}` is a local, and locals are not visible inside a "

@@ -1,0 +1,42 @@
+import text
+
+word closed ( Result[T, IoError] Result[unit, IoError] -> Result[T, IoError] )
+  where T: Unrestricted
+  swap match
+    case ok swap match case ok drop ok case err nip err end
+    case err swap match case ok drop case err drop end err
+  end
+end
+
+word with-opened ( ..a Q Result[File, IoError] -> ..a Result[T, IoError] )
+  where Q: [ ..a File -> ..a File Result[T, IoError] ] & Unrestricted, T: Unrestricted
+  match
+    case ok swap call swap file-close closed
+    case err nip err
+  end
+end
+
+pub word with-file-open ( ..a str Q -> ..a Result[T, IoError] )
+  where Q: [ ..a File -> ..a File Result[T, IoError] ] & Unrestricted, T: Unrestricted
+  swap file-open with-opened
+end
+
+pub word with-file-create ( ..a str Q -> ..a Result[T, IoError] )
+  where Q: [ ..a File -> ..a File Result[T, IoError] ] & Unrestricted, T: Unrestricted
+  swap file-create with-opened
+end
+
+pub word with-file-append ( ..a str Q -> ..a Result[T, IoError] )
+  where Q: [ ..a File -> ..a File Result[T, IoError] ] & Unrestricted, T: Unrestricted
+  swap file-append with-opened
+end
+
+pub word file-lines ( str -> Result[array[str], IoError] )
+  read-file [ str-lines ] result-map
+end
+
+pub word write-lines ( str array[str] -> Result[unit, IoError] )
+  let path lines in
+    path lines "\n" str-join lines array-len 0u32 > if "\n" str-concat end write-file
+  end
+end

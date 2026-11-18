@@ -1,0 +1,69 @@
+pub word min ( T T -> T ) where T: PartialOrd & Unrestricted
+  over over < rot rot select
+end
+
+pub word max ( T T -> T ) where T: PartialOrd & Unrestricted
+  over over > rot rot select
+end
+
+pub word clamp ( T T T -> T ) where T: PartialOrd & Unrestricted
+  [ max ] dip min
+end
+
+word zero-like ( T -> T ) where T: Integer dup - end
+
+word one-like ( T -> T ) where T: Integer zero-like bit-not dup +.wrap bit-not end
+
+word round-down? ( T T -> bool ) where T: Integer
+  let r b in
+    r zero-like let zero in
+      r zero != r zero < b zero < != and
+    end
+  end
+end
+
+pub word floor-mod ( T T -> T ) where T: Integer
+  let a b in
+    a b % let r in
+      r b round-down? if r b + else r end
+    end
+  end
+end
+
+pub word floor-div ( T T -> T ) where T: Integer
+  let a b in
+    a b / let q in
+      a b % b round-down? if q q one-like - else q end
+    end
+  end
+end
+
+pub word euclid-mod ( T T -> T ) where T: Integer
+  let a b in
+    a b % let r in
+      r r zero-like < if
+        b b zero-like > if r b + else r b - end
+      else
+        r
+      end
+    end
+  end
+end
+
+pub word euclid-div ( T T -> T ) where T: Integer
+  let a b in
+    a b / let q in
+      a b % dup zero-like < if
+        b b zero-like > if q q one-like - else q q one-like + end
+      else
+        q
+      end
+    end
+  end
+end
+
+pub word even? ( T -> bool ) where T: Integer
+  let n in n n one-like bit-and n zero-like == end
+end
+
+pub word odd? ( T -> bool ) where T: Integer even? not end

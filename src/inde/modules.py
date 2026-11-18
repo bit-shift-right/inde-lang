@@ -92,6 +92,7 @@ class Module:
     own: dict[str, dict[str, str]] = field(default_factory=dict)
     public: dict[str, set[str]] = field(default_factory=dict)
     arities: dict[str, int] = field(default_factory=dict)
+    hidden: dict[str, str] = field(default_factory=dict)
     failed: bool = False
 
     def declares(self, kind: str, name: str) -> bool:
@@ -116,9 +117,24 @@ def declared_names(
             found[CONSTANTS].append((declaration.name, public, declaration.location))
         else:
             found[TYPES].append((declaration.name, public, declaration.location))
+            shown = public and not declaration.opaque
             for variant in declaration.variants:
-                found[WORDS].append((variant.name, public, variant.location))
+                found[WORDS].append((variant.name, shown, variant.location))
+            if len(declaration.variants) == 1:
+                only = declaration.variants[0]
+                found[WORDS].append((f"{only.name}-unpack", shown, only.location))
     return found
+
+
+def hidden_constructors(program: Program) -> dict[str, str]:
+    hidden: dict[str, str] = {}
+    for declaration in program.declarations:
+        if isinstance(declaration, TypeDeclaration) and declaration.opaque:
+            for variant in declaration.variants:
+                hidden[variant.name] = declaration.name
+            if len(declaration.variants) == 1:
+                hidden[f"{declaration.variants[0].name}-unpack"] = declaration.name
+    return hidden
 
 
 class Loader:
@@ -362,6 +378,7 @@ class Loader:
                 name: f"{module.prefix}{name}" for name, _, _ in names[kind]
             }
             module.public[kind] = {name for name, public, _ in names[kind] if public}
+        module.hidden = hidden_constructors(module.program)
         for declaration in module.program.declarations:
             if isinstance(declaration, TypeDeclaration) and declaration.public:
                 module.arities[declaration.name] = len(declaration.params)
@@ -452,6 +469,13 @@ class Resolver:
     def explain(self, kind: str, name: str, location: Location | None) -> None:
         label = {WORDS: "word", TYPES: "type", CONSTANTS: "constant"}[kind]
         for imported in self.module.imports:
+            if kind == WORDS and name in imported.hidden:
+                self.fail(
+                    f"`{name}` belongs to the opaque type `{imported.hidden[name]}`, "
+                    f"so only module `{imported.name}` may use it",
+                    location,
+                )
+                return
             if imported.declares(kind, name):
                 self.fail(
                     f"{label} `{name}` is private to module `{imported.name}`",
@@ -488,7 +512,7 @@ class Resolver:
                 body=self.body(declaration.body, frozenset()),
             )
         if isinstance(declaration, TypeDeclaration):
-            if declaration.public:
+            if declaration.public and not declaration.opaque:
                 self.check_exposure(
                     f"the public type `{declaration.name}`",
                     [f for v in declaration.variants for f in v.fields],

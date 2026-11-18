@@ -49,6 +49,7 @@ from inde.lexer import (
     TokenType,
     tokenize,
 )
+from inde.records import field_words
 
 CORE_TYPE_ARGUMENTS: dict[str, int] = {
     "i8": 0,
@@ -70,7 +71,14 @@ CORE_TYPE_ARGUMENTS: dict[str, int] = {
     "arraybuf": 1,
 }
 
-CORE_LIBRARY_ARGUMENTS: dict[str, int] = {"Option": 1, "Result": 2, "Pair": 2}
+CORE_LIBRARY_ARGUMENTS: dict[str, int] = {
+    "Option": 1,
+    "Result": 2,
+    "Pair": 2,
+    "File": 0,
+    "IoError": 0,
+    "IoErrorKind": 0,
+}
 
 MODULE_NAME = re.compile(r"[a-z][a-z0-9-]*")
 
@@ -208,6 +216,7 @@ class Parser:
     def at_declaration_start(self) -> bool:
         return (
             self.at_keyword("pub")
+            or self.at_keyword("opaque")
             or self.at_keyword("import")
             or self.at_keyword("word")
             or self.at_keyword("type")
@@ -255,7 +264,10 @@ class Parser:
                         )
                     imports.append(self.parse_import())
                 else:
-                    declarations.append(self.parse_declaration())
+                    declaration = self.parse_declaration()
+                    declarations.append(declaration)
+                    if isinstance(declaration, TypeDeclaration):
+                        declarations.extend(field_words(declaration))
             except IndeError as error:
                 self.errors.append(error)
                 if self.position == before:
@@ -282,14 +294,25 @@ class Parser:
 
     def parse_declaration(self) -> Declaration:
         public = self.accept_token(TokenType.KEYWORD, "pub") is not None
+        opaque = public and self.accept_token(TokenType.KEYWORD, "opaque") is not None
+        if opaque and not (self.at_keyword("type") or self.at_keyword("linear")):
+            self.fail(
+                "`opaque` comes before a `type` declaration, found "
+                f"{self.describe_token(self.peek())}"
+            )
         if public and not self.at_declaration_start():
             self.fail(
                 "`pub` comes before a `word`, `type` or `const` declaration, "
                 f"found {self.describe_token(self.peek())}"
             )
+        if self.at_keyword("opaque"):
+            self.fail("`opaque` comes after `pub`, as in `pub opaque type`")
         if self.at_keyword("pub") or self.at_keyword("import"):
             self.fail(f"`{self.peek().text}` cannot follow `pub`")
         declaration = self.parse_plain_declaration()
+        if opaque:
+            assert isinstance(declaration, TypeDeclaration)
+            return replace(declaration, public=True, opaque=True)
         return replace(declaration, public=True) if public else declaration
 
     def parse_plain_declaration(self) -> Declaration:
@@ -538,6 +561,13 @@ class Parser:
         variants = [self.parse_variant()]
         while self.accept_token(TokenType.SYMBOL, "|"):
             variants.append(self.parse_variant())
+        if len(variants) > 1:
+            for variant in variants:
+                if variant.field_names:
+                    raise IndeError(
+                        "only a type with one constructor may name its fields",
+                        variant.location,
+                    )
         return TypeDeclaration(
             name=name.text,
             params=tuple(params),
@@ -554,6 +584,7 @@ class Parser:
             )
         self.expect_token(TokenType.NAME, error_description="a constructor name")
         fields: list[TypeExpression] = []
+        names: list[Token | None] = []
         if self.accept_token(TokenType.LEFT_PARENTHESIS):
             if not self.starts_type():
                 self.fail(
@@ -561,12 +592,37 @@ class Parser:
                     f"write `{name.text}` for a variant without fields"
                 )
             while self.starts_type():
+                names.append(self.parse_field_name())
                 fields.append(self.parse_type())
             self.expect_token(
                 TokenType.RIGHT_PARENTHESIS,
                 error_description=f"`)` to close the fields of `{name.text}`",
             )
-        return Variant(name=name.text, fields=tuple(fields), location=name.location)
+        named = [token for token in names if token is not None]
+        if named and len(named) != len(names):
+            self.fail(f"name every field of `{name.text}` or none", name)
+        seen: set[str] = set()
+        for token in named:
+            if token.text in seen:
+                self.fail(f"`{name.text}` has two fields named `{token.text}`", token)
+            seen.add(token.text)
+        return Variant(
+            name=name.text,
+            fields=tuple(fields),
+            field_names=tuple(token.text for token in named),
+            location=name.location,
+        )
+
+    def parse_field_name(self) -> Token | None:
+        if not (
+            self.peek().type is TokenType.NAME and self.peek(1).type is TokenType.COLON
+        ):
+            return None
+        token = self.advance()
+        self.advance()
+        if not self.starts_type():
+            self.fail(f"expected the type of the field `{token.text}`")
+        return token
 
     def starts_item(self) -> bool:
         token = self.peek()

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import BinaryIO
 
 from inde.ast import Body
 from inde.type_model import (
@@ -31,6 +32,23 @@ class Closure:
     parts: tuple[str | Value, ...] = ()
 
 
+@dataclass(frozen=True)
+class IoFailure:
+    kind: str
+    path: str | None
+    message: str
+
+    def text(self) -> str:
+        return self.message if self.path is None else f"{self.path}: {self.message}"
+
+
+@dataclass(eq=False)
+class OpenFile:
+    handle: BinaryIO
+    path: str
+    writing: bool
+
+
 Payload = (
     int
     | float
@@ -41,6 +59,8 @@ Payload = (
     | Data
     | Quoted
     | Closure
+    | IoFailure
+    | OpenFile
 )
 
 

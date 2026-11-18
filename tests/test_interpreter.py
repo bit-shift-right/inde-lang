@@ -6,9 +6,10 @@ import pytest
 
 from inde.checker import check
 from inde.errors import IndeErrors, IndeTrap
-from inde.interpreter import Interpreter, Session, display, inspect
+from inde.interpreter import Interpreter, Session, inspect
 from inde.parser import parse
 from inde.repl import run_repl
+from inde.system import display
 from inde.type_model import F32, I32, U8, Type, option_of
 from inde.values import Data, Value, array, boolean, character, none, some, string
 
@@ -117,9 +118,9 @@ def test_calls() -> None:
     declarations = """
     word three ( -> i32 ) 1 2 + end
     word add-three ( i32 -> i32 ) three + end
-    word show ( i32 -> ) print end
+    word report ( i32 -> ) print end
     """
-    assert printed("10 add-three show three show", declarations) == ["13", "3"]
+    assert printed("10 add-three report three report", declarations) == ["13", "3"]
 
 
 def test_words_run_in_order() -> None:

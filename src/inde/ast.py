@@ -194,12 +194,14 @@ class WordDeclaration(Node):
     where: tuple[Constraint, ...] = ()
     body: Body = ()
     public: bool = False
+    copies_field: str | None = None
 
 
 @dataclass(frozen=True, kw_only=True)
 class Variant(Node):
     name: str
     fields: tuple[TypeExpression, ...] = ()
+    field_names: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -209,6 +211,7 @@ class TypeDeclaration(Node):
     variants: tuple[Variant, ...] = ()
     linear: bool = False
     public: bool = False
+    opaque: bool = False
 
 
 @dataclass(frozen=True, kw_only=True)

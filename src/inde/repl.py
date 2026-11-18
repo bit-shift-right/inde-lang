@@ -6,6 +6,7 @@ from typing import TextIO
 from inde import logger
 from inde.errors import IndeErrors, IndeTrap
 from inde.interpreter import Session
+from inde.system import System
 
 SOURCE_NAME = "repl"
 PROMPT = ">> "
@@ -21,7 +22,9 @@ def run_repl(
     input_stream = input_stream or sys.stdin
     output = output or sys.stdout
     error_output = error_output or sys.stderr
-    session = session or Session(output)
+    if session is None:
+        system = System(stdout=output, stderr=error_output, stdin=input_stream)
+        session = Session(output, system=system)
     interactive = input_stream.isatty()
 
     pending = ""

@@ -89,6 +89,8 @@ PLAIN_RUNTIME_WORDS = frozenset(
         "str-to-bytes",
         "bytes-to-str",
         "str-from-char",
+        "str-parse-f64",
+        "str-parse-f32",
         "strbuf-new",
         "strbuf-push",
         "strbuf-append",
@@ -96,7 +98,29 @@ PLAIN_RUNTIME_WORDS = frozenset(
         "strbuf-snapshot",
         "strbuf-freeze",
         "strbuf-from-str",
+        "read-line",
+        "read-all",
+        "args",
+        "env-get",
+        "read-file",
+        "read-file-bytes",
+        "write-file",
+        "append-file",
+        "write-file-bytes",
+        "file-open",
+        "file-create",
+        "file-append",
+        "file-read-line",
+        "file-read-all",
+        "file-read-bytes",
+        "file-write",
+        "file-write-bytes",
+        "file-close",
+        "io-error-kind",
     ]
+)
+DISPLAY_RUNTIME_WORDS = frozenset(
+    {"print", "write", "eprint", "ewrite", "show", "show-quoted"}
 )
 
 
@@ -379,6 +403,7 @@ class Lowerer:
             entry=("$main", "result" if main.effect.outputs else "unit"),
         )
         module.types = self.type_table(module)
+        module.runtime_version = ir.runtime_version_of(module)
         return module
 
     def request(
@@ -1128,7 +1153,7 @@ class FunctionLowering:
             call = ir.Runtime(name=underscored(base), modifier=modifier)
             emit(self.lowerer.declare(call, operands, results))
         else:
-            if base == "print":
+            if base in DISPLAY_RUNTIME_WORDS:
                 arguments: tuple[ir.TypeArgument, ...] = (operands[0],)
             elif base in ("curry", "compose"):
                 arguments = tuple(operands)

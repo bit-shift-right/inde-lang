@@ -12,8 +12,11 @@ from inde.type_model import (
     CHAR,
     F32,
     F64,
+    FILE,
     FLOAT_TYPES,
     INTEGER_TYPES,
+    IO_ERROR,
+    IO_ERROR_KIND,
     LINEAR,
     NUMBER_TYPES,
     SIGNED_INTEGER_TYPES,
@@ -32,16 +35,27 @@ from inde.type_model import (
     result_of,
 )
 
-SUPPORTED_RUNTIME = 1
+SUPPORTED_RUNTIME = 3
 
-LIBRARY_ARITY = {"Option": 1, "Result": 2, "Pair": 2}
+LIBRARY_ARITY = {"Option": 1, "Result": 2, "Pair": 2, "IoErrorKind": 0}
+IO_ERROR_KINDS = (
+    "not-found",
+    "permission-denied",
+    "already-exists",
+    "is-a-directory",
+    "not-a-directory",
+    "invalid-text",
+    "other-error",
+)
 
 INTEGER_ARITHMETIC = ("", "wrap", "sat", "checked")
 FLOAT_FORMS = ("", "ieee", "checked")
 COMPARISONS = frozenset({"eq", "ne", "lt", "le", "gt", "ge"})
-DISPLAYABLE = (*NUMBER_TYPES, BOOL, CHAR, STR, UNIT)
+DISPLAYABLE = (*NUMBER_TYPES, BOOL, CHAR, STR, UNIT, IO_ERROR)
 LITERAL_MATCHED = (*INTEGER_TYPES, CHAR, STR, BOOL)
-SCALARS = frozenset(t.name for t in (*NUMBER_TYPES, BOOL, CHAR, STR, UNIT, STRBUF))
+SCALARS = frozenset(
+    t.name for t in (*NUMBER_TYPES, BOOL, CHAR, STR, UNIT, STRBUF, FILE, IO_ERROR)
+)
 STACK_OPS = frozenset({"dup", "over", "drop", "swap", "rot"})
 LOCAL_OPS = frozenset({"set", "get", "take", "drop"})
 
@@ -53,6 +67,8 @@ STRING_CALLS: dict[str, tuple[tuple[Type, ...], tuple[Type, ...]]] = {
     "str_to_bytes": ((STR,), (array_of(U8),)),
     "bytes_to_str": ((array_of(U8),), (result_of(STR, U32),)),
     "str_from_char": ((CHAR,), (STR,)),
+    "str_parse_f64": ((STR,), (result_of(F64, STR),)),
+    "str_parse_f32": ((STR,), (result_of(F32, STR),)),
     "strbuf_new": ((), (STRBUF,)),
     "strbuf_push": ((STRBUF, CHAR), (STRBUF,)),
     "strbuf_append": ((STRBUF, STR), (STRBUF,)),
@@ -62,6 +78,34 @@ STRING_CALLS: dict[str, tuple[tuple[Type, ...], tuple[Type, ...]]] = {
     "strbuf_from_str": ((STR,), (STRBUF,)),
     **{f"str_{op}": ((STR, STR), (BOOL,)) for op in COMPARISONS},
 }
+LINES = result_of(option_of(STR), IO_ERROR)
+TEXT = result_of(STR, IO_ERROR)
+BYTES = array_of(U8)
+BYTE_RESULT = result_of(BYTES, IO_ERROR)
+DONE = result_of(UNIT, IO_ERROR)
+OPENED = result_of(FILE, IO_ERROR)
+SYSTEM_CALLS: dict[str, tuple[tuple[Type, ...], tuple[Type, ...]]] = {
+    "read_line": ((), (LINES,)),
+    "read_all": ((), (TEXT,)),
+    "args": ((), (array_of(STR),)),
+    "env_get": ((STR,), (option_of(STR),)),
+    "read_file": ((STR,), (TEXT,)),
+    "read_file_bytes": ((STR,), (BYTE_RESULT,)),
+    "write_file": ((STR, STR), (DONE,)),
+    "append_file": ((STR, STR), (DONE,)),
+    "write_file_bytes": ((STR, BYTES), (DONE,)),
+    "file_open": ((STR,), (OPENED,)),
+    "file_create": ((STR,), (OPENED,)),
+    "file_append": ((STR,), (OPENED,)),
+    "file_read_line": ((FILE,), (FILE, LINES)),
+    "file_read_all": ((FILE,), (FILE, TEXT)),
+    "file_read_bytes": ((FILE, U32), (FILE, BYTE_RESULT)),
+    "file_write": ((FILE, STR), (FILE, DONE)),
+    "file_write_bytes": ((FILE, BYTES), (FILE, DONE)),
+    "file_close": ((FILE,), (DONE,)),
+    "io_error_kind": ((IO_ERROR,), (IO_ERROR_KIND,)),
+}
+DISPLAY_CALLS = frozenset({"print", "write", "eprint", "ewrite", "show", "show_quoted"})
 UNRESTRICTED_BUFFER_CALLS = frozenset(
     {"arraybuf_get", "arraybuf_snapshot", "arraybuf_freeze", "arraybuf_from_array"}
 )
@@ -97,6 +141,8 @@ def library_variants(
         return (("none", ()), ("some", (args[0],)))
     if name == "Result":
         return (("ok", (args[0],)), ("err", (args[1],)))
+    if name == "IoErrorKind":
+        return tuple((kind, ()) for kind in IO_ERROR_KINDS)
     return (("pair", (args[0], args[1])),)
 
 
@@ -184,7 +230,7 @@ class Verifier:
     def linear(self, checked_type: Type) -> bool:
         if checked_type.effect is not None:
             return checked_type.args[0] == LINEAR
-        if checked_type.name in ("strbuf", "arraybuf"):
+        if checked_type.name in ("strbuf", "arraybuf", "File"):
             return True
         if checked_type.name in SCALARS or checked_type.name == "array":
             return False
@@ -303,16 +349,26 @@ class Verifier:
         self, call: ir.Runtime
     ) -> tuple[tuple[Type, ...], tuple[Type, ...]]:
         name, modifier, arguments = call.name, call.modifier, call.arguments
+        if name in ir.RUNTIME_2_CALLS and self.module.runtime_version < 2:
+            raise Invalid(f"{call.full_name} needs runtime 2")
+        if name in ir.RUNTIME_3_CALLS and self.module.runtime_version < 3:
+            raise Invalid(f"{call.full_name} needs runtime 3")
+        if name in SYSTEM_CALLS:
+            if modifier or arguments:
+                raise Invalid(f"{call.full_name} is not in the runtime interface")
+            return SYSTEM_CALLS[name]
         if name in STRING_CALLS:
             if modifier or arguments:
                 raise Invalid(f"{call.full_name} is not in the runtime interface")
             return STRING_CALLS[name]
         types = [a for a in arguments if not isinstance(a, tuple)]
-        if name == "print":
+        if name in DISPLAY_CALLS:
             if modifier or len(arguments) != 1 or len(types) != 1:
                 raise Invalid(f"{call.full_name} is not in the runtime interface")
             if types[0] not in DISPLAYABLE:
                 raise Invalid(f"{ir.ir_type(types[0])} cannot be displayed")
+            if name in ("show", "show_quoted"):
+                return (types[0],), (STR,)
             return (types[0],), ()
         if name == "curry":
             return self.curry(call, types)

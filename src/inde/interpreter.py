@@ -14,6 +14,7 @@ from inde.ast import (
     CharacterLiteral,
     ConstantReference,
     ConstructorPattern,
+    Declaration,
     FloatLiteral,
     If,
     Import,
@@ -26,10 +27,19 @@ from inde.ast import (
     Propagate,
     Quotation,
     StringLiteral,
+    TypeDeclaration,
     While,
     WordReference,
 )
-from inde.builtins import BIT_CASTS, BUILTINS, CONVERSIONS, STACK_WORDS, StackWord
+from inde.builtins import (
+    BIT_CASTS,
+    BUILTINS,
+    CONVERSIONS,
+    SHOW_WORDS,
+    STACK_WORDS,
+    SYSTEM_WORDS,
+    StackWord,
+)
 from inde.checker import Checker, ConstantInfo, WordInfo, error_order
 from inde.errors import IndeError, IndeErrors, IndeTrap
 from inde.lexer import Location, quote, tokenize
@@ -48,18 +58,22 @@ from inde.numeric import (
     float_to_float,
     float_to_integer,
     float_unary,
-    format_float,
     fused_multiply_add,
     integer_arithmetic,
     integer_to_float,
     integer_to_integer,
     integer_unary,
+    parse_float,
     shift,
 )
 from inde.parser import Parser
+from inde.records import field_words
+from inde.system import System, display
 from inde.type_model import (
     BOOL,
     CHAR,
+    F32,
+    F64,
     FLOAT_TYPES,
     STR,
     STRBUF,
@@ -73,6 +87,8 @@ from inde.type_model import (
 )
 from inde.values import (
     Data,
+    IoFailure,
+    OpenFile,
     Quoted,
     Value,
     array,
@@ -100,21 +116,12 @@ def plain(value: Value) -> object:
     return data
 
 
-def display(value: Value) -> str:
-    if value.type == UNIT:
-        return "unit"
-    data = value.data
-    if isinstance(data, bool):
-        return "true" if data else "false"
-    if isinstance(data, float):
-        return format_float(data, value.type)
-    if isinstance(data, (int, str)):
-        return str(data)
-    raise AssertionError(f"`{value.type}` has no display text")
-
-
 def inspect(value: Value, nested: bool = False) -> str:
     data = value.data
+    if isinstance(data, OpenFile):
+        return f"<File {quote(data.path, chr(34))}>"
+    if isinstance(data, IoFailure):
+        return f"<IoError {quote(data.text(), chr(34))}>"
     if isinstance(data, Quoted):
         return "[ ... ]" if nested else str(value.type)
     if isinstance(data, list):
@@ -168,10 +175,12 @@ class Interpreter:
         words: dict[str, WordInfo],
         constants: dict[str, ConstantInfo],
         output: TextIO | None = None,
+        system: System | None = None,
     ) -> None:
         self.words = words
         self.constants = constants
         self.output = output or sys.stdout
+        self.system = System(stdout=self.output) if system is None else system
         self.deepest = 0
 
     def execute(self, body: Body, stack: list[Value]) -> None:
@@ -412,6 +421,9 @@ class Interpreter:
         count = BUILTINS[name].arguments
         operands = stack[len(stack) - count :]
         del stack[len(stack) - count :]
+        if base in SYSTEM_WORDS or base in SHOW_WORDS:
+            stack.extend(self.system.run(base, operands, location))
+            return
         if base.startswith("strbuf-"):
             stack.extend(self.strbuf_operation(base, operands))
             return
@@ -445,10 +457,6 @@ class Interpreter:
         if base in ("curry", "compose"):
             return self.quotation_operation(base, operands)
         first = operands[0]
-        if base == "print":
-            print(display(first), file=self.output)
-            return None
-
         if base in ("==", "!=", "<", "<=", ">", ">="):
             return boolean(compare(base, plain(first), plain(operands[1])))
         if base == "select":
@@ -602,6 +610,13 @@ class Interpreter:
             except UnicodeDecodeError as error:
                 return [Value(result, Data("err", (Value(U32, error.start),)))]
         assert isinstance(first, str)
+        if base in ("str-parse-f64", "str-parse-f32"):
+            float_type = F64 if base == "str-parse-f64" else F32
+            parsed = parse_float(first, float_type)
+            result = result_of(float_type, STR)
+            if isinstance(parsed, str):
+                return [Value(result, Data("err", (string(parsed),)))]
+            return [Value(result, Data("ok", (Value(float_type, parsed),)))]
         if base == "char-utf8-len":
             return [Value(U32, len(first.encode()))]
         if base == "str-from-char":
@@ -719,11 +734,13 @@ class Interpreter:
         assert isinstance(result, Data)
         if result.constructor == "ok":
             return 0
-        print(display(result.fields[0]), file=error_output or sys.stderr)
+        self.system.report(display(result.fields[0]), error_output)
         return 1
 
 
 TEXT_WORDS = (
+    "str-parse-f64",
+    "str-parse-f32",
     "str-len",
     "str-concat",
     "str-slice",
@@ -773,10 +790,11 @@ class Session:
         checker: Checker | None = None,
         directory: Path | None = None,
         library: Path | None = None,
+        system: System | None = None,
     ) -> None:
         self.checker = checker or Checker()
         self.interpreter = Interpreter(
-            self.checker.words, self.checker.constants, output
+            self.checker.words, self.checker.constants, output, system
         )
         self.stack: list[Value] = []
         self.loader = Loader(library)
@@ -790,17 +808,27 @@ class Session:
         except IndeError as error:
             raise IndeErrors([error]) from None
         if isinstance(parsed, Import):
-            declarations = self.loader.session_import(parsed)
-            self.declare(Program(declarations=tuple(declarations)))
+            imported = self.loader.session_import(parsed)
+            self.declare(Program(declarations=tuple(imported)))
         elif isinstance(parsed, tuple):
             body = self.loader.session_resolve(parsed)
             assert isinstance(body, tuple)
             self.run_body(body)
         else:
-            declaration = self.loader.session_resolve(parsed)
-            assert not isinstance(declaration, tuple)
-            self.declare(Program(declarations=(declaration,)))
-            self.loader.session_declared(parsed)
+            written = [parsed, *self.field_words(parsed)]
+            declarations: list[Declaration] = []
+            for declaration in written:
+                resolved = self.loader.session_resolve(declaration)
+                assert not isinstance(resolved, tuple)
+                declarations.append(resolved)
+            self.declare(Program(declarations=tuple(declarations)))
+            for declaration in written:
+                self.loader.session_declared(declaration)
+
+    def field_words(self, declaration: Declaration) -> list[Declaration]:
+        if isinstance(declaration, TypeDeclaration):
+            return field_words(declaration)
+        return []
 
     def known_types(self) -> dict[str, int]:
         known = {name: info.parameters for name, info in self.checker.types.items()}

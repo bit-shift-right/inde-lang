@@ -1,0 +1,32 @@
+import arrays
+import text
+
+const WIDTH = 100u32
+const RULE = 110u32
+
+word alive? ( array[bool] u32 -> bool ) array-get.checked false option-or end
+
+word bit ( bool -> u32 ) 1u32 0u32 select end
+
+word next-cell ( array[bool] u32 -> bool )
+  let row i in
+    row i 1u32 -.wrap alive? bit 4u32 *
+    row i alive? bit 2u32 * +
+    row i 1u32 + alive? bit +
+    let pattern in RULE pattern shr 1u32 bit-and 1u32 == end
+  end
+end
+
+word next-row ( array[bool] -> array[bool] )
+  let row in 0u32 row array-len array-range row [ swap next-cell ] curry array-map end
+end
+
+word render ( array[bool] -> str ) [ if '*' else ' ' end ] array-map str-from-chars end
+
+word first-row ( -> array[bool] )
+  0u32 WIDTH array-range [ WIDTH 2u32 - == ] array-map
+end
+
+word main ( -> )
+  first-row [ dup render print next-row ] WIDTH 2u32 - times drop
+end

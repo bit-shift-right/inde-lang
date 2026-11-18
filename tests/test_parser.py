@@ -16,6 +16,7 @@ from inde.ast import (
     Declaration,
     FloatLiteral,
     If,
+    Import,
     IntegerLiteral,
     Item,
     Let,
@@ -460,8 +461,8 @@ def test_body_form_errors(source: str, fragment: str) -> None:
     assert fragment in get_failure_message(source)
 
 
-def repl(line: str) -> Declaration | Body:
-    return Parser(tokenize(line)).parse_repl_line()  # type:ignore[return-value]
+def repl(line: str) -> Declaration | Import | Body:
+    return Parser(tokenize(line)).parse_repl_line()
 
 
 def test_repl_lines() -> None:

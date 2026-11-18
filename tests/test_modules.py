@@ -474,3 +474,95 @@ def test_parsing_imports_and_visibility() -> None:
     )
     assert [i.name for i in program.imports] == ["geometry", "text-tools"]
     assert [d.public for d in program.declarations] == [True, False, True, True, False]
+
+
+BOXES = """\
+pub type Box = box( i32 )
+pub opaque type Sealed = sealed( i32 ) | blank
+type Hidden = hidden( i32 )
+pub opaque type Wrapper = wrapper( Hidden )
+pub word seal ( i32 -> Sealed ) sealed end
+pub word open ( Sealed -> i32 ) match case sealed case blank 0 end end
+pub word same? ( Sealed Sealed -> bool ) == end
+pub word wrap ( i32 -> Wrapper ) hidden wrapper end
+"""
+
+
+def test_unpack_words_of_imported_types(tmp_path: Path) -> None:
+    files = {
+        "boxes.inde": BOXES,
+        "main.inde": "import boxes\nword main ( -> ) 3 box box-unpack print end",
+    }
+    assert run(tmp_path, files) == "3\n"
+
+
+def test_opaque_types(tmp_path: Path) -> None:
+    files = {
+        "boxes.inde": BOXES,
+        "main.inde": (
+            "import boxes\n"
+            "word keep-it ( Sealed -> Sealed ) end\n"
+            "word main ( -> ) 4 seal keep-it open print 1 seal 1 seal same? print "
+            "5 wrap drop end"
+        ),
+    }
+    assert run(tmp_path, files) == "4\ntrue\n"
+
+
+@pytest.mark.parametrize(
+    ("main", "expected"),
+    [
+        (
+            "word main ( -> ) 1 sealed drop end",
+            (
+                "`sealed` belongs to the opaque type `Sealed`, so only module `boxes` "
+                "may use it"
+            ),
+        ),
+        (
+            (
+                "word f ( Sealed -> ) match case blank case sealed drop end end\n"
+                "word main ( -> ) end"
+            ),
+            "`blank` belongs to the opaque type `Sealed`",
+        ),
+        (
+            "word main ( -> ) 1 wrap wrapper-unpack drop end",
+            "`wrapper-unpack` belongs to the opaque type `Wrapper`",
+        ),
+        (
+            "word main ( -> ) 1 seal 1 seal == drop end",
+            "`boxes:Sealed` is opaque, so only module `boxes` can compare its values",
+        ),
+        (
+            "word main ( -> ) 1 seal some 1 seal some == drop end",
+            "`Option[boxes:Sealed]` has no equality, because `boxes:Sealed` is opaque",
+        ),
+    ],
+)
+def test_what_an_opaque_type_hides(tmp_path: Path, main: str, expected: str) -> None:
+    files = {"boxes.inde": BOXES, "main.inde": f"import boxes\n{main}"}
+    found = errors(tmp_path, files)
+    assert any(expected in error for error in found), found
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [
+        ("opaque type Thing = thing", "`opaque` comes after `pub`"),
+        ("pub opaque word w ( -> ) end", "`opaque` comes before a `type` declaration"),
+        ("pub opaque const LIMIT = 1", "`opaque` comes before a `type` declaration"),
+    ],
+)
+def test_opaque_syntax(source: str, expected: str) -> None:
+    with pytest.raises(IndeErrors) as failure:
+        parse(source)
+    assert expected in str(failure.value)
+
+
+def test_parsing_opaque_types() -> None:
+    program = parse(
+        "pub opaque type Aa = a\npub opaque linear type Bb = b\ntype Cc = c"
+    )
+    found = [(d.public, getattr(d, "opaque", None)) for d in program.declarations]
+    assert found == [(True, True), (True, True), (False, False)]

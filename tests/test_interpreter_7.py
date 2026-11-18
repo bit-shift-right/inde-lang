@@ -218,10 +218,10 @@ def test_a_question_mark_inside_a_consume() -> None:
         "word step ( Option[i32] i32 -> Option[i32] )\n"
         "  swap match case some add case none drop none end\n"
         "end\n"
-        'word show ( Option[i32] -> ) match case some print case none "overflow" '
+        'word report ( Option[i32] -> ) match case some print case none "overflow" '
         "print end end\nword main ( -> )\n"
-        "  0 some 10 fill [ step ] arraybuf-consume show\n"
-        "  2147483000 some 3 fill [ 1000 * step ] arraybuf-consume show\n"
+        "  0 some 10 fill [ step ] arraybuf-consume report\n"
+        "  2147483000 some 3 fill [ 1000 * step ] arraybuf-consume report\n"
         "end\n"
     )
     lines, _ = run(source)

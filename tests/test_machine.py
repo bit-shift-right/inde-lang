@@ -2,6 +2,7 @@ import io
 import sys
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -200,9 +201,12 @@ def test_question_mark() -> None:
         "word quarter ( i32 -> Result[i32, str] )\n"
         '  "note" swap half ? swap drop half\n'
         "end\n"
-        "word show ( Result[i32, str] -> ) match case ok print case err print end end\n"
+        "word report ( Result[i32, str] -> ) match case ok print case err print end "
+        "end\n"
     )
-    assert printed("8 quarter show 6 quarter show 3 quarter show", declarations) == [
+    assert printed(
+        "8 quarter report 6 quarter report 3 quarter report", declarations
+    ) == [
         "2",
         "odd",
         "odd",
@@ -299,7 +303,8 @@ def test_debug_information_only_affects_diagnostics() -> None:
             for name in ("then_body", "else_body", "condition", "body"):
                 inner = getattr(instruction, name, None)
                 if inner is not None:
-                    instruction = replace(instruction, **{name: stripped(inner)})  # type: ignore[arg-type]
+                    changes: dict[str, Any] = {name: stripped(inner)}
+                    instruction = replace(instruction, **changes)
             result.append(instruction)
         return tuple(result)
 

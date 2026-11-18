@@ -103,6 +103,7 @@ VALID_KEYWORDS: tuple[str, ...] = (
     "const",
     "import",
     "pub",
+    "opaque",
 )
 
 

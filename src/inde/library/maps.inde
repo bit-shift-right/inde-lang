@@ -1,0 +1,256 @@
+import arrays
+
+pub opaque type Map[K, V] = leaf | node( Map[K, V] K V Map[K, V] u32 )
+
+pub opaque type Set[T] = set( Map[T, unit] )
+
+word height ( Map[K, V] -> u32 ) where K: Unrestricted, V: Unrestricted
+  match case leaf 0u32 case node let l k v r h in h end end
+end
+
+word joined ( Map[K, V] K V Map[K, V] -> Map[K, V] )
+  where K: Unrestricted, V: Unrestricted
+  let l k v r in
+    l height r height let hl hr in
+      l k v r hl hr > if hl else hr end 1u32 + node
+    end
+  end
+end
+
+word rotated-right ( Map[K, V] K V Map[K, V] -> Map[K, V] )
+  where K: Unrestricted, V: Unrestricted
+  let l k v r in
+    l match
+      case leaf leaf k v r joined
+      case node
+        let ll lk lv lr lh in
+          ll height lr height >= if
+            ll lk lv lr k v r joined joined
+          else
+            lr match
+              case leaf ll lk lv leaf joined k v r joined
+              case node
+                let rl rk rv rr rh in
+                  ll lk lv rl joined rk rv rr k v r joined joined
+                end
+            end
+          end
+        end
+    end
+  end
+end
+
+word rotated-left ( Map[K, V] K V Map[K, V] -> Map[K, V] )
+  where K: Unrestricted, V: Unrestricted
+  let l k v r in
+    r match
+      case leaf l k v leaf joined
+      case node
+        let rl rk rv rr rh in
+          rr height rl height >= if
+            l k v rl joined rk rv rr joined
+          else
+            rl match
+              case leaf l k v leaf joined rk rv rr joined
+              case node
+                let ll lk lv lr lh in
+                  l k v ll joined lk lv lr rk rv rr joined joined
+                end
+            end
+          end
+        end
+    end
+  end
+end
+
+word balanced ( Map[K, V] K V Map[K, V] -> Map[K, V] )
+  where K: Unrestricted, V: Unrestricted
+  let l k v r in
+    l height r height let hl hr in
+      hl hr 1u32 + > if
+        l k v r rotated-right
+      else
+        hr hl 1u32 + > if l k v r rotated-left else l k v r joined end
+      end
+    end
+  end
+end
+
+pub word map-new ( -> Map[K, V] ) leaf end
+
+pub word map-insert ( Map[K, V] K V -> Map[K, V] )
+  where K: Ord & Unrestricted, V: Unrestricted
+  let key value in
+    match
+      case leaf leaf key value leaf joined
+      case node
+        let l k v r h in
+          key k < if
+            l key value map-insert k v r balanced
+          else
+            key k > if
+              l k v r key value map-insert balanced
+            else
+              l key value r h node
+            end
+          end
+        end
+    end
+  end
+end
+
+pub word map-get ( Map[K, V] K -> Option[V] )
+  where K: Ord & Unrestricted, V: Unrestricted
+  let key in
+    match
+      case leaf none
+      case node
+        let l k v r h in
+          key k < if
+            l key map-get
+          else
+            key k > if r key map-get else v some end
+          end
+        end
+    end
+  end
+end
+
+pub word map-contains? ( Map[K, V] K -> bool )
+  where K: Ord & Unrestricted, V: Unrestricted
+  map-get match case some drop true case none false end
+end
+
+word least ( Map[K, V] K V -> K V ) where K: Unrestricted, V: Unrestricted
+  let k v in
+    match
+      case leaf k v
+      case node let l nk nv r h in l nk nv least end
+    end
+  end
+end
+
+word without-least ( Map[K, V] -> Map[K, V] ) where K: Unrestricted, V: Unrestricted
+  match
+    case leaf leaf
+    case node
+      let l k v r h in
+        l height 0u32 == if r else l without-least k v r balanced end
+      end
+  end
+end
+
+word merged ( Map[K, V] Map[K, V] -> Map[K, V] ) where K: Unrestricted, V: Unrestricted
+  let l r in
+    r match
+      case leaf l
+      case node
+        let rl rk rv rr rh in
+          rl rk rv least let k v in
+            l k v rl rk rv rr rh node without-least balanced
+          end
+        end
+    end
+  end
+end
+
+pub word map-remove ( Map[K, V] K -> Map[K, V] )
+  where K: Ord & Unrestricted, V: Unrestricted
+  let key in
+    match
+      case leaf leaf
+      case node
+        let l k v r h in
+          key k < if
+            l key map-remove k v r balanced
+          else
+            key k > if l k v r key map-remove balanced else l r merged end
+          end
+        end
+    end
+  end
+end
+
+pub word map-update ( ..a Map[K, V] K V Q -> ..a Map[K, V] )
+  where Q: [ ..a V -> ..a V ], K: Ord & Unrestricted, V: Unrestricted
+  let entries key default action in
+    entries key map-get default option-or action call
+    let value in entries key value map-insert end
+  end
+end
+
+word collect ( arraybuf[Pair[K, V]] Map[K, V] -> arraybuf[Pair[K, V]] )
+  match
+    case leaf
+    case node
+      let l k v r h in l collect k v pair arraybuf-push r collect end
+  end
+end
+
+pub word map-entries ( Map[K, V] -> array[Pair[K, V]] )
+  arraybuf-new swap collect arraybuf-freeze
+end
+
+pub word map-keys ( Map[K, V] -> array[K] ) where V: Unrestricted
+  map-entries [ pair-unpack drop ] array-map
+end
+
+pub word map-values ( Map[K, V] -> array[V] ) where K: Unrestricted
+  map-entries [ pair-unpack nip ] array-map
+end
+
+pub word map-len ( Map[K, V] -> u32 ) where K: Unrestricted, V: Unrestricted
+  map-entries array-len
+end
+
+pub word map-from-entries ( array[Pair[K, V]] -> Map[K, V] ) where K: Ord
+  map-new [ pair-unpack map-insert ] array-fold
+end
+
+pub word map-equal? ( Map[K, V] Map[K, V] -> bool )
+  where K: Ord & Unrestricted, V: Eq & Unrestricted
+  map-entries swap map-entries ==
+end
+
+pub word set-new ( -> Set[T] ) map-new set end
+
+pub word set-add ( Set[T] T -> Set[T] ) where T: Ord & Unrestricted
+  swap set-unpack swap unit map-insert set
+end
+
+pub word set-remove ( Set[T] T -> Set[T] ) where T: Ord & Unrestricted
+  swap set-unpack swap map-remove set
+end
+
+pub word set-contains? ( Set[T] T -> bool ) where T: Ord & Unrestricted
+  swap set-unpack swap map-contains?
+end
+
+pub word set-items ( Set[T] -> array[T] ) set-unpack map-keys end
+
+pub word set-len ( Set[T] -> u32 ) where T: Unrestricted set-unpack map-len end
+
+pub word set-from-array ( array[T] -> Set[T] ) where T: Ord
+  set-new [ set-add ] array-fold
+end
+
+pub word set-union ( Set[T] Set[T] -> Set[T] ) where T: Ord & Unrestricted
+  set-items swap [ set-add ] array-fold
+end
+
+pub word set-intersection ( Set[T] Set[T] -> Set[T] ) where T: Ord & Unrestricted
+  let first second in
+    first set-items second [ swap set-contains? ] curry array-filter set-from-array
+  end
+end
+
+pub word set-difference ( Set[T] Set[T] -> Set[T] ) where T: Ord & Unrestricted
+  let first second in
+    first set-items second [ swap set-contains? not ] curry array-filter
+    set-from-array
+  end
+end
+
+pub word set-equal? ( Set[T] Set[T] -> bool ) where T: Ord & Unrestricted
+  set-items swap set-items ==
+end

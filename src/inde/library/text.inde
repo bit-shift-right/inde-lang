@@ -1,0 +1,336 @@
+import arrays
+
+pub word ascii-digit? ( char -> bool ) let c in c '0' >= c '9' <= and end end
+
+pub word ascii-upper? ( char -> bool ) let c in c 'A' >= c 'Z' <= and end end
+
+pub word ascii-lower? ( char -> bool ) let c in c 'a' >= c 'z' <= and end end
+
+pub word ascii-letter? ( char -> bool )
+  let c in c ascii-upper? c ascii-lower? or end
+end
+
+pub word ascii-space? ( char -> bool )
+  match case ' ' true case '\t' true case '\n' true case '\r' true
+    case '\u{B}' true case '\u{C}' true else false end
+end
+
+pub word ascii-to-upper ( char -> char )
+  dup ascii-lower? if to-u32 32u32 - to-char end
+end
+
+pub word ascii-to-lower ( char -> char )
+  dup ascii-upper? if to-u32 32u32 + to-char end
+end
+
+word piece ( str u32 u32 -> str )
+  str-slice match case some case none "" end
+end
+
+word at? ( str str u32 -> bool )
+  let text needle i in
+    text i i needle str-len +.sat str-slice
+    match case some needle == case none false end
+  end
+end
+
+word find-from ( str str u32 -> Option[u32] )
+  let text needle i in
+    i text str-len > if
+      none
+    else
+      text needle i at? if i some else text needle i 1u32 + find-from end
+    end
+  end
+end
+
+pub word str-find ( str str -> Option[u32] ) 0u32 find-from end
+
+pub word str-contains? ( str str -> bool )
+  str-find match case some drop true case none false end
+end
+
+pub word str-starts-with? ( str str -> bool ) 0u32 at? end
+
+pub word str-ends-with? ( str str -> bool )
+  let text suffix in
+    text str-len suffix str-len < if
+      false
+    else
+      text suffix text str-len suffix str-len - at?
+    end
+  end
+end
+
+word split-from ( arraybuf[str] str str u32 u32 -> arraybuf[str] )
+  let parts text sep start i in
+    i text str-len > if
+      parts text start text str-len piece arraybuf-push
+    else
+      text sep i at? if
+        parts text start i piece arraybuf-push
+        text sep i sep str-len + dup split-from
+      else
+        parts text sep start i 1u32 + split-from
+      end
+    end
+  end
+end
+
+pub word str-split ( str str -> array[str] )
+  let text sep in
+    arraybuf-new
+    sep str-len 0u32 == if
+      text arraybuf-push
+    else
+      text sep 0u32 0u32 split-from
+    end
+    arraybuf-freeze
+  end
+end
+
+word without-cr ( str -> str )
+  let line in
+    line "\r" str-ends-with? if line 0u32 line str-len 1u32 - piece else line end
+  end
+end
+
+word lines-from ( arraybuf[str] str u32 -> arraybuf[str] )
+  let lines text start in
+    start text str-len >= if
+      lines
+    else
+      text "\n" start find-from match
+        case some
+          let stop in
+            lines text start stop piece without-cr arraybuf-push
+            text stop 1u32 + lines-from
+          end
+        case none
+          lines text start text str-len piece without-cr arraybuf-push
+      end
+    end
+  end
+end
+
+pub word str-lines ( str -> array[str] )
+  arraybuf-new swap 0u32 lines-from arraybuf-freeze
+end
+
+word join-from ( strbuf array[str] str u32 -> strbuf )
+  let parts sep i in
+    i parts array-len < if
+      i 0u32 > if sep strbuf-append end
+      parts i array-get strbuf-append
+      parts sep i 1u32 + join-from
+    end
+  end
+end
+
+pub word str-join ( array[str] str -> str )
+  strbuf-new rot rot 0u32 join-from strbuf-freeze
+end
+
+word skip-space ( str u32 -> u32 )
+  let text i in
+    text i str-char-at match
+      case some ascii-space? if text i 1u32 + skip-space else i end
+      case none i
+    end
+  end
+end
+
+word back-space ( str u32 -> u32 )
+  let text j in
+    j 0u32 == if
+      j
+    else
+      text j 1u32 - str-char-at match
+        case some ascii-space? if text j 1u32 - back-space else j end
+        case none j
+      end
+    end
+  end
+end
+
+pub word str-trim-start ( str -> str )
+  let text in text text 0u32 skip-space text str-len piece end
+end
+
+pub word str-trim-end ( str -> str )
+  let text in text 0u32 text text str-len back-space piece end
+end
+
+pub word str-trim ( str -> str ) str-trim-start str-trim-end end
+
+pub word str-replace ( str str str -> str )
+  let text old new in
+    old str-len 0u32 == if text else text old str-split new str-join end
+  end
+end
+
+word repeat-into ( strbuf str u32 -> strbuf )
+  let text count in
+    count 0u32 > if text strbuf-append text count 1u32 - repeat-into end
+  end
+end
+
+pub word str-repeat ( str u32 -> str )
+  strbuf-new rot rot repeat-into strbuf-freeze
+end
+
+word chars-from ( arraybuf[char] str u32 -> arraybuf[char] )
+  let text i in
+    text i str-char-at match
+      case some dup char-utf8-len i + let next in arraybuf-push text next chars-from end
+      case none
+    end
+  end
+end
+
+pub word str-chars ( str -> array[char] )
+  arraybuf-new swap 0u32 chars-from arraybuf-freeze
+end
+
+word push-chars ( strbuf array[char] u32 -> strbuf )
+  let chars i in
+    i chars array-len < if
+      chars i array-get strbuf-push chars i 1u32 + push-chars
+    end
+  end
+end
+
+pub word str-from-chars ( array[char] -> str )
+  strbuf-new swap 0u32 push-chars strbuf-freeze
+end
+
+word map-ascii ( strbuf str u32 bool -> strbuf )
+  let text i upper in
+    text i str-char-at match
+      case some
+        upper if ascii-to-upper else ascii-to-lower end
+        dup char-utf8-len i + let next in strbuf-push text next upper map-ascii end
+      case none
+    end
+  end
+end
+
+pub word str-ascii-upper ( str -> str )
+  strbuf-new swap 0u32 true map-ascii strbuf-freeze
+end
+
+pub word str-ascii-lower ( str -> str )
+  strbuf-new swap 0u32 false map-ascii strbuf-freeze
+end
+
+word digits ( i64 str u32 bool -> Result[i64, str] )
+  let total text i negative in
+    text i str-char-at match
+      case some
+        dup ascii-digit? if
+          to-u32 48u32 - to-i64 let digit in
+            total 10i64 *.checked match
+              case some
+                negative if digit -.checked else digit +.checked end
+                match
+                  case some text i 1u32 + negative digits
+                  case none "integer out of range: " text show-quoted str-concat err
+                end
+              case none "integer out of range: " text show-quoted str-concat err
+            end
+          end
+        else
+          drop "not an integer: " text show-quoted str-concat err
+        end
+      case none total ok
+    end
+  end
+end
+
+pub word str-parse-int ( str -> Result[i64, str] )
+  let text in
+    text 0u32 str-char-at match
+      case some
+        match
+          case '-' 0i64 text 1u32 true digits-after-sign
+          case '+' 0i64 text 1u32 false digits-after-sign
+          else 0i64 text 0u32 false digits-after-sign
+        end
+      case none "not an integer: " text show-quoted str-concat err
+    end
+  end
+end
+
+word digits-after-sign ( i64 str u32 bool -> Result[i64, str] )
+  let total text i negative in
+    text str-len i > if
+      total text i negative digits
+    else
+      "not an integer: " text show-quoted str-concat err
+    end
+  end
+end
+
+word format-from ( strbuf str array[str] u32 u32 -> strbuf )
+  let template values i next in
+    template i str-char-at match
+      case some
+        dup match
+          case '{'
+            drop template i 1u32 + str-char-at match
+              case some
+                match
+                  case '{' "{" strbuf-append template values i 2u32 + next format-from
+                  case '}'
+                    next values array-len < if
+                      values next array-get strbuf-append
+                      template values i 2u32 + next 1u32 + format-from
+                    else
+                      "{}" strbuf-append template values i 2u32 + next format-from
+                    end
+                  else "{" strbuf-append template values i 1u32 + next format-from
+                end
+              case none "{" strbuf-append
+            end
+          case '}'
+            drop template i 1u32 + str-char-at match
+              case some
+                match
+                  case '}' "}" strbuf-append template values i 2u32 + next format-from
+                  else "}" strbuf-append template values i 1u32 + next format-from
+                end
+              case none "}" strbuf-append
+            end
+          else
+            dup char-utf8-len i + let after in
+              strbuf-push template values after next format-from
+            end
+        end
+      case none
+    end
+  end
+end
+
+pub word str-format ( str array[str] -> str )
+  let template values in
+    strbuf-new template values 0u32 0u32 format-from strbuf-freeze
+  end
+end
+
+word padding ( str u32 char -> str )
+  let text width fill in
+    text str-chars array-len let count in
+      count width < if fill str-from-char width count - str-repeat else "" end
+    end
+  end
+end
+
+pub word str-pad-left ( str u32 char -> str )
+  let text width fill in text width fill padding text str-concat end
+end
+
+pub word str-pad-right ( str u32 char -> str )
+  let text width fill in text text width fill padding str-concat end
+end
+
+pub word str-reverse ( str -> str ) str-chars array-reverse str-from-chars end

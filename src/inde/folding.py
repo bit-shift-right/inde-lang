@@ -14,7 +14,14 @@ from inde.ast import (
     StringLiteral,
     WordReference,
 )
-from inde.builtins import BIT_CASTS, BUILTINS, CONVERSIONS, STACK_WORDS, StackWord
+from inde.builtins import (
+    BIT_CASTS,
+    BUILTINS,
+    CONVERSIONS,
+    STACK_WORDS,
+    SYSTEM_WORDS,
+    StackWord,
+)
 from inde.errors import IndeTrap
 from inde.lexer import Location
 from inde.type_model import INTEGER_TYPES
@@ -48,7 +55,7 @@ class CertainFailure(Exception):
 def is_foldable(name: str) -> bool:
     if name.partition(".")[0] in CONVERSIONS or name in BIT_CASTS:
         return True
-    if name not in BUILTINS or name in IMPURE:
+    if name not in BUILTINS or name in IMPURE or name in SYSTEM_WORDS:
         return False
     return not name.startswith(IMPURE_PREFIXES)
 

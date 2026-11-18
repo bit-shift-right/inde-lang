@@ -722,9 +722,9 @@ def test_the_entry_point() -> None:
 
 def test_the_runtime_version() -> None:
     module = compiled("word main ( -> ) end")
-    module.runtime_version = 2
+    module.runtime_version = 4
     assert problems(module) == [
-        "the module needs runtime 2, but this implementation provides runtime 1"
+        "the module needs runtime 4, but this implementation provides runtime 3"
     ]
 
 

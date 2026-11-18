@@ -251,9 +251,9 @@ def test_locals_are_visible_in_nested_blocks() -> None:
 
 def test_each_call_has_its_own_locals() -> None:
     declarations = (
-        "word show ( i32 -> ) let n in n 0 > if n 1 - show end n print end end\n"
+        "word report ( i32 -> ) let n in n 0 > if n 1 - report end n print end end\n"
     )
-    assert printed("3 show", declarations) == ["0", "1", "2", "3"]
+    assert printed("3 report", declarations) == ["0", "1", "2", "3"]
 
 
 def test_a_callee_does_not_see_the_callers_locals() -> None:

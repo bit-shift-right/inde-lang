@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 import struct
 from fractions import Fraction
 from typing import Self
@@ -403,3 +404,35 @@ def fused_multiply_add(
         else:
             result = 0.0
     return fit_float(result, mode, operands)
+
+
+DECIMAL_DIGITS = r"[0-9](?:_?[0-9])*"
+FRACTION = rf"(?:\.({DECIMAL_DIGITS}))?"
+EXPONENT = rf"(?:[eE]([+-]?{DECIMAL_DIGITS}))?"
+FLOAT_TEXT = re.compile(rf"([+-]?)({DECIMAL_DIGITS}){FRACTION}{EXPONENT}")
+DECIMAL_REACH = 400
+
+
+def parse_float(text: str, number_type: Type) -> float | str:
+    shown = '"' + text.replace("\\", "\\\\").replace('"', '\\"') + '"'
+    match = FLOAT_TEXT.fullmatch(text)
+    if match is None:
+        return f"not a number: {shown}"
+    sign, whole, fraction, exponent = (part or "" for part in match.groups())
+    whole = whole.replace("_", "")
+    if len(whole) > 1 and whole[0] == "0":
+        return f"not a number: {shown}"
+    fraction = fraction.replace("_", "")
+    digits = (whole + fraction).lstrip("0")
+    negative = sign == "-"
+    if not digits:
+        return -0.0 if negative else 0.0
+    power = int(exponent.replace("_", "") or "0") - len(fraction)
+    reach = len(digits) + power
+    if reach > DECIMAL_REACH or reach < -DECIMAL_REACH:
+        return f"number out of range: {shown}"
+    exact = Fraction(int(digits)) * Fraction(10) ** power
+    rounded = round_exact(exact, number_type)
+    if rounded == math.inf or rounded == 0.0:
+        return f"number out of range: {shown}"
+    return -rounded if negative else rounded

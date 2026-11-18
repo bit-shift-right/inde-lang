@@ -14,6 +14,7 @@ from inde.type_model import (
     FLOAT_TYPES,
     LINEAR,
     NUMBER_TYPES,
+    OPAQUE_LIBRARY_TYPES,
     STR,
     UNIT,
     UNRESTRICTED,
@@ -23,7 +24,16 @@ from inde.type_model import (
 )
 
 SCALAR_NAMES = {
-    t.name: t for t in (*NUMBER_TYPES, BOOL, CHAR, STR, UNIT, Type("strbuf"))
+    t.name: t
+    for t in (
+        *NUMBER_TYPES,
+        BOOL,
+        CHAR,
+        STR,
+        UNIT,
+        Type("strbuf"),
+        *OPAQUE_LIBRARY_TYPES,
+    )
 }
 STACK_OPS = frozenset({"dup", "over", "drop"})
 INTEGER = re.compile(r"-?[0-9]+")

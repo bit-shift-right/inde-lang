@@ -7,8 +7,11 @@ from inde.type_model import (
     CHAR,
     F32,
     F64,
+    FILE,
     FLOAT_TYPES,
     INTEGER_TYPES,
+    IO_ERROR,
+    IO_ERROR_KIND,
     NUMBER_TYPES,
     STR,
     STRBUF,
@@ -161,7 +164,11 @@ define(
     "Unrestricted",
 )
 
-define("print", (T,), (), "a value that can be displayed", "Display")
+DISPLAYED = "a value that can be displayed"
+for name in ("print", "write", "eprint", "ewrite"):
+    define(name, (T,), (), DISPLAYED, "Display")
+for name in ("show", "show-quoted"):
+    define(name, (T,), (STR,), DISPLAYED, "Display")
 define("unit", (), (UNIT,), "nothing")
 
 define("strbuf-new", (), (STRBUF,), "nothing")
@@ -283,6 +290,64 @@ define("str-to-bytes", (STR,), (array_of(U8),), "a `str`")
 define("bytes-to-str", (array_of(U8),), (result_of(STR, U32),), "an `array[u8]`")
 define("char-utf8-len", (CHAR,), (U32,), "a `char`")
 define("str-from-char", (CHAR,), (STR,), "a `char`")
+define("str-parse-f64", (STR,), (result_of(F64, STR),), "a `str`")
+define("str-parse-f32", (STR,), (result_of(F32, STR),), "a `str`")
+
+
+TEXT_RESULT = result_of(STR, IO_ERROR)
+BYTES = array_of(U8)
+BYTES_RESULT = result_of(BYTES, IO_ERROR)
+DONE = result_of(UNIT, IO_ERROR)
+LINE_RESULT = result_of(option_of(STR), IO_ERROR)
+PATH = "a `str` path"
+OPEN_FILE = "a `File`"
+
+define("read-line", (), (LINE_RESULT,), "nothing")
+define("read-all", (), (TEXT_RESULT,), "nothing")
+define("args", (), (array_of(STR),), "nothing")
+define("env-get", (STR,), (option_of(STR),), "a `str` name")
+define("read-file", (STR,), (TEXT_RESULT,), PATH)
+define("read-file-bytes", (STR,), (BYTES_RESULT,), PATH)
+define("write-file", (STR, STR), (DONE,), "a `str` path and a `str`")
+define("append-file", (STR, STR), (DONE,), "a `str` path and a `str`")
+define("write-file-bytes", (STR, BYTES), (DONE,), "a `str` path and an `array[u8]`")
+for name in ("file-open", "file-create", "file-append"):
+    define(name, (STR,), (result_of(FILE, IO_ERROR),), PATH)
+define("file-read-line", (FILE,), (FILE, LINE_RESULT), OPEN_FILE)
+define("file-read-all", (FILE,), (FILE, TEXT_RESULT), OPEN_FILE)
+define("file-read-bytes", (FILE, U32), (FILE, BYTES_RESULT), "a `File` and a `u32`")
+define("file-write", (FILE, STR), (FILE, DONE), "a `File` and a `str`")
+define("file-write-bytes", (FILE, BYTES), (FILE, DONE), "a `File` and an `array[u8]`")
+define("file-close", (FILE,), (DONE,), OPEN_FILE)
+define("io-error-kind", (IO_ERROR,), (IO_ERROR_KIND,), "an `IoError`")
+
+SYSTEM_WORDS = frozenset(
+    {
+        "print",
+        "write",
+        "eprint",
+        "ewrite",
+        "read-line",
+        "read-all",
+        "args",
+        "env-get",
+        "read-file",
+        "read-file-bytes",
+        "write-file",
+        "append-file",
+        "write-file-bytes",
+        "file-open",
+        "file-create",
+        "file-append",
+        "file-read-line",
+        "file-read-all",
+        "file-read-bytes",
+        "file-write",
+        "file-write-bytes",
+        "file-close",
+    }
+)
+SHOW_WORDS = frozenset({"show", "show-quoted", "io-error-kind"})
 
 
 CONVERSIONS: dict[str, Type] = {
